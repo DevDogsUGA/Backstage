@@ -1,0 +1,23 @@
+name: Set up the workspace
+description: >-
+  The post-checkout bootstrap every job shares: enable corepack (pnpm), set up
+  Node from .nvmrc with a pnpm cache, and install with a frozen lockfile.
+
+# Mirrors DevDogsUGA's .github/actions/setup-workspace. Checkout is not here,
+# and cannot be: a local composite action (`uses: ./.github/actions/…`) only
+# resolves after the repository is on disk, because the action's own files
+# live in it. So `actions/checkout` stays in each job, with `fetch-depth`
+# chosen per job.
+runs:
+  using: composite
+  steps:
+    - name: Enable corepack (pnpm)
+      run: corepack enable
+      shell: bash
+    - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+      with:
+        node-version-file: .nvmrc
+        cache: pnpm
+    - name: Install dependencies
+      run: pnpm install --frozen-lockfile
+      shell: bash

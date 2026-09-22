@@ -1,0 +1,56 @@
+name: CI
+
+# Validation only. No deploys, and — deliberately — no secrets: this repo
+# never runs a service (see README, "What this repo is"), so nothing here
+# needs a credential to prove it works. Every package's `test` script is
+# expected to be credential-free by construction; a script that genuinely
+# needs a live service (e.g. `@devdogsuga/db`'s `test:rls`) is named
+# something other than `test` for exactly that reason and is NOT run here.
+#
+# INERT UNTIL A REMOTE EXISTS. This workflow is authored ahead of the GitHub
+# remote and the `@devdogsuga` npm org being claimed (see the parent plan,
+# Phase 0) — `pull_request`/`push` simply never fire with no remote to host
+# them. Once the remote exists this needs no further edits to start running;
+# review it now on the assumption that it does.
+#
+# Same reasoning as DevDogsUGA's ci.yaml for what's absent: on `pull_request`,
+# GitHub runs the workflow definition FROM THE PULL REQUEST, not from the
+# protected branch, so any credential in scope here is readable by whoever
+# opened the PR. Actions are pinned to full commit SHAs rather than tags for
+# the same reason DevDogsUGA's are — a tag is mutable.
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # Build + typecheck + test every package in the workspace.
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: ./.github/actions/setup-workspace
+      # Build before typecheck/test: packages import each other's `dist/`
+      # (workspace:* deps), so an unbuilt sibling makes a downstream
+      # typecheck or test fail on a missing module, not a real error.
+      - name: Build (workspace)
+        run: pnpm -r --if-present run build
+      - name: Typecheck (workspace)
+        run: pnpm -r --if-present run typecheck
+      - name: Test (workspace)
+        run: pnpm -r --if-present run test
+      # Redundant with the workspace build above (apps/slides has its own
+      # `build` script, so `pnpm -r build` already builds it) — kept as an
+      # explicit, separately-named step because the 9/28 deck lives here and
+      # nothing in this repo is allowed to break it silently inside a
+      # workspace-wide pass.
+      - name: Build the slides app
+        run: pnpm --filter slides build
