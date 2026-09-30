@@ -1,0 +1,28 @@
+# format:check / format:write pass .gitignore as an --ignore-path too, so
+# untracked build output (dist, .packs, .wrangler, ...) is already excluded
+# there. Only list files that are tracked but must never be reformatted, plus
+# anything covered by a NESTED .gitignore, which --ignore-path does not read.
+
+pnpm-lock.yaml
+
+# Private workshop submodules: other repos' content.
+apps/slides/workshops/
+
+# Generated and committed. Reformatting is a change the generator undoes.
+packages/brand/src/generated/
+packages/newsletter/src/generated/
+apps/slides/worker/worker-configuration.d.ts
+
+# Hand-written fixtures whose exact bytes the tests depend on.
+packages/devtools/test-fixtures/
+packages/devtools/test/fixture-repo/
+
+# apps/slides/.gitignore
+apps/slides/export/
+# apps/workshops-vscode/.gitignore
+apps/workshops-vscode/.vscode-test/
+apps/workshops-vscode/dist-test/
+
+# Slidev decks: slide separators, per-slide frontmatter and Vue-in-markdown
+# that prettier's markdown parser rewrites into something else.
+apps/slides/decks/
