@@ -8,16 +8,12 @@
  * read it before the session's environment is entered.
  */
 import { createCatalog, type CommandGroup } from "@devdogsuga/cli-core/catalog";
-import { cfCommand } from "./cf/catalog.js";
 import { completionsCommand } from "./completions/catalog.js";
 import { checkCommand } from "./check/catalog.js";
 import { cronCommand } from "./cron/catalog.js";
-import { dbCommand } from "./db/catalog.js";
 import { doctorCommand } from "./doctor/catalog.js";
-import { emailsCommand } from "./emails/catalog.js";
 import { envCommand } from "./env/catalog.js";
-import { genCommand } from "./gen/catalog.js";
-import { grantRootCommand, rolesCommand } from "./roles/catalog.js";
+import { rolesCommand } from "./roles/catalog.js";
 import { oauthCommand } from "./oauth/catalog.js";
 import {
   drizzleKitCommand,
@@ -35,23 +31,11 @@ import { workflowsCommand } from "./workflows/catalog.js";
 export const GROUPS: readonly CommandGroup[] = [
   {
     title: "Workspace",
-    commands: [
-      setupCommand,
-      oauthCommand,
-      scriptCommand,
-      runCommand,
-      genCommand,
-    ],
+    commands: [setupCommand, oauthCommand, scriptCommand, runCommand],
   },
   {
     title: "Runtime & infrastructure",
-    commands: [
-      dbCommand,
-      cfCommand,
-      presetCommand,
-      cronCommand,
-      workflowsCommand,
-    ],
+    commands: [presetCommand, cronCommand, workflowsCommand],
   },
   {
     title: "The real tools",
@@ -63,12 +47,8 @@ export const GROUPS: readonly CommandGroup[] = [
     ],
   },
   {
-    title: "Content & communications",
-    commands: [emailsCommand],
-  },
-  {
     title: "Configuration & integrations",
-    commands: [envCommand, rolesCommand, grantRootCommand],
+    commands: [envCommand, rolesCommand],
   },
   {
     title: "Environment",

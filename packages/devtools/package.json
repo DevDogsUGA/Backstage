@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": false,
   "type": "module",
-  "description": "Contributor CLI for a DevDogsUGA checkout: the real tools with the session's tier filled in, a menu over them, and the checks CI runs. Ships built JS; run via `pnpm dlx @devdogsuga/devtools` (or the `devtools` bin once installed) from inside a DevDogsUGA clone. `devtools-ci` and `devtools-ci-bare` are deprecated aliases that forward to @devdogsuga/backstage's code.",
+  "description": "Contributor CLI for a DevDogsUGA checkout: the real tools with the session's tier filled in, a menu over them, and the checks CI runs. Ships built JS; run via `pnpm dlx @devdogsuga/devtools` (or the `devtools` bin once installed) from inside a DevDogsUGA clone.",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -15,9 +15,7 @@
     "provenance": true
   },
   "bin": {
-    "devtools": "./bin/devtools.mjs",
-    "devtools-ci": "./bin/devtools-ci.mjs",
-    "devtools-ci-bare": "./bin/devtools-ci-bare.mjs"
+    "devtools": "./bin/devtools.mjs"
   },
   "files": [
     "bin",
@@ -58,7 +56,6 @@
     }
   },
   "devDependencies": {
-    "@devdogsuga/backstage": "workspace:*",
     "@devdogsuga/cli-core": "workspace:*",
     "@devdogsuga/config": "workspace:*",
     "@devdogsuga/db": "workspace:*",

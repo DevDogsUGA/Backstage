@@ -51,17 +51,16 @@ command path (deprecated ones marked), for tools that check what a page shows.
 
 The `db` and `cf` namespaces are gone: `supabase`, `wrangler`, `drizzle-kit`
 and `psql` plus package scripts (`types:db`, `types:drizzle`, `types:cf`,
-`preview`) replace them. What is left of `db` (`start`, `types`, `introspect`),
-`cf preview` and `run` are deprecated aliases, hidden from the menu, for
-callers that have not moved yet; `--help` names each replacement.
+`preview`) replace them. `run` stays as a deprecated alias, hidden from the
+menu, for callers that have not moved yet (TASK-404 removes it); `--help` names
+its replacement. The retired `db`, `cf`, `gen`, `emails` and `grant-root` names
+are refused with where they went.
 
 What always needs production secrets is not here. `deploy`, `env
 pull|push|audit` and `planner` are in `@devdogsuga/backstage`
 (`pnpm dlx @devdogsuga/backstage …`, no checkout needed to start); `devtools
 env` keeps `init`, `example` and `reset`, and `bw` is gone (backstage's `env`
-signs in to Bitwarden itself). `devtools-ci` and `devtools-ci-bare` are
-deprecated aliases that run backstage's code, bundled in, so DevDogsUGA's
-workflows keep working until they move to `backstage`.
+signs in to Bitwarden itself). CI calls `backstage` directly.
 
 The menu is generated from the same command tree the argv parser walks, so
 there is no second list to fall out of step — reach for `--help` at any level
@@ -79,7 +78,7 @@ default, in both `pnpm devtools` and `devtools-ci`:
   per-job opt-out) — or the build has no DSN. The DSN is baked in when
   Backstage's `publish.yaml` builds the package, from the repo's
   `DEVTOOLS_SENTRY_DSN` Actions variable, so only published builds report;
-  local builds and `pnpm pack:local` tarballs don't. Either condition means
+  local builds and `pnpm pack` tarballs don't. Either condition means
   no `Sentry.init()` call happens: no network request, no console output.
 - **What's scrubbed**: this CLI touches local `.env` files, so every event
   passes through
@@ -96,8 +95,7 @@ default, in both `pnpm devtools` and `devtools-ci`:
 composes the tree and `src/cli.ts` maps top-level command names to handlers. The
 shared core (repo and peer loading, ui, telemetry, tier and env entry, the
 catalog, help and menu) lives in the private `@devdogsuga/cli-core` package,
-which `tsdown` inlines into `dist/` (until the cutover, so is backstage's
-`devtools-ci` alias entry). Only those are bundled: every other
+which `tsdown` inlines into `dist/`. Only that is bundled: every other
 import stays external and must be declared in this package's `dependencies` or
 `peerDependencies`, and the build fails when one is not
 (`../../scripts/check-bundle-imports.mjs` reads the built output).

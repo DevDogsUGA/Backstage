@@ -45,16 +45,12 @@ import {
 import { errorMessage, explain } from "@devdogsuga/cli-core/ui";
 import { ownVersion } from "@devdogsuga/cli-core/version";
 import { catalog } from "./catalog.js";
-import { handleCf } from "./cf/commands.js";
 import { handleCheck } from "./check/commands.js";
 import { handleCompletions } from "./completions/commands.js";
 import { handleCron } from "./cron/commands.js";
-import { handleDb } from "./db/commands.js";
 import { handleDoctor } from "./doctor/commands.js";
-import { handleEmails } from "./emails/commands.js";
 import { handleEnv } from "./env/commands.js";
-import { handleGen } from "./gen/commands.js";
-import { handleGrantRoot, handleRoles } from "./roles/commands.js";
+import { handleRoles } from "./roles/commands.js";
 import { handleOAuth } from "./oauth/commands.js";
 import { handlePassthrough } from "./passthrough/commands.js";
 import { handlePreset } from "./preset/commands.js";
@@ -84,17 +80,12 @@ const CONTRIBUTOR_HANDLERS: Record<string, CommandHandler> = {
   run: runTask,
   oauth: handleOAuth,
   script: handleScript,
-  emails: handleEmails,
-  cf: handleCf,
-  gen: handleGen,
   cron: handleCron,
   workflows: handleWorkflows,
   env: handleEnv,
-  db: handleDb,
   doctor: handleDoctor,
   preset: handlePreset,
   roles: handleRoles,
-  "grant-root": handleGrantRoot,
 };
 
 /**
@@ -161,6 +152,31 @@ const RETIRED: Record<string, { message: string; hints: string[] }> = {
   github: {
     message: "`github` moved to backstage.",
     hints: ["pnpm dlx @devdogsuga/backstage github <rulesets|settings>"],
+  },
+  // Gone since the restructure; each names what replaced it.
+  db: {
+    message: "The `db` namespace is gone.",
+    hints: [
+      "start:      pnpm devtools supabase start",
+      "types:      pnpm -F @devdogsuga/supabase types:db",
+      "introspect: pnpm -F <app> types:drizzle",
+    ],
+  },
+  cf: {
+    message: "`cf preview` is now each app's own `preview` script.",
+    hints: ["pnpm -F <app> preview"],
+  },
+  "grant-root": {
+    message: "`grant-root` is now `roles grant`.",
+    hints: ["pnpm devtools roles grant <email> President"],
+  },
+  gen: {
+    message: "`gen campus-map` is now the platform's `fetch:campus-map`.",
+    hints: ["pnpm -F platform fetch:campus-map"],
+  },
+  emails: {
+    message: "`emails` is gone; previews run from the email package.",
+    hints: ["pnpm -F @devdogsuga/email preview"],
   },
 };
 

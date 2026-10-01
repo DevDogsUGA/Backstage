@@ -13,8 +13,7 @@
  * this file.
  *
  * Walking the catalog means an interactive command added there is in the
- * menu the same day, with its options. Commands marked `cli-only` and deploy
- * commands in the separate `devtools-ci` bin do not appear here.
+ * menu the same day, with its options. Commands marked `cli-only` do not appear here.
  */
 import { confirm, note, select, text } from "@clack/prompts";
 import { positionals } from "@devdogsuga/cli-core/args";

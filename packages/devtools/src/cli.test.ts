@@ -54,7 +54,8 @@ describe("--help --json", () => {
     const byPath = new Map(doc.commands.map((c) => [c.path, c]));
     expect(byPath.get("check migrations")?.surface).toBe("cli-only");
     expect(byPath.get("completions")?.surface).toBe("cli-only");
-    expect(byPath.get("db types")?.deprecated).toContain("types:db");
+    expect(byPath.get("run")?.deprecated).toContain("pnpm -r run");
+    expect(byPath.has("db types")).toBe(false);
     expect(byPath.get("preset restart-stack")?.surface).toBe("interactive");
     // The CI tree is a separate bin and stays out.
     expect(byPath.has("deploy")).toBe(false);
@@ -95,7 +96,6 @@ describe("--dry-run", () => {
       ["supabase"],
       ["preset", "apply-migrations"],
       ["run", "build"],
-      ["emails"],
       ["roles", "list"],
     ]) {
       expect(dryRunKind(catalog, path), path.join(" ")).toBeDefined();
@@ -111,10 +111,6 @@ describe("--dry-run", () => {
       ["workflows", "serve"],
       ["env", "pull"],
       ["env", "example"],
-      ["db", "start"],
-      ["cf", "preview"],
-      ["gen", "campus-map"],
-      ["grant-root"],
       ["roles", "grant"],
       ["roles", "revoke"],
     ]) {

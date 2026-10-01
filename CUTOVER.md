@@ -13,7 +13,7 @@ Blocked on all three of: the `@devdogsuga` npm org being claimed, this repo
 having a GitHub remote, and a first publish of each package existing on the
 registry. See `.github/workflows/publish.yaml`'s header for the full
 precondition list — it is inert until then. Until that first publish exists,
-see "The local-pack bridge" below for how `DevDogsUGA` consumes these packages
+see "The local-pack bridge (retired)" below for how `DevDogsUGA` consumed these packages
 in the meantime.
 
 Migrated from `DevDogsUGA@2165a7230e51fc922a3b37de51450f4f6c37a699`, and kept
@@ -22,8 +22,9 @@ Anything merged into those packages in the product repo after that sha has to
 be forward-ported before the consumer switches over, or it will be silently
 reverted by the cutover.
 
-The eight packages today: `config`, `telemetry`, `docs-compiler`, `env`, `db`,
-`brand`, `newsletter`, `events`. `airtable` was migrated in Wave 1 and later
+The eight packages at cutover: `config`, `telemetry`, `docs-compiler`, `env`,
+`db`, `brand`, `newsletter`, `events`. `docs-compiler` has since moved to
+DevDogsUGA as `@devdogsuga/docs-kit` and is gone from this repo. `airtable` was migrated in Wave 1 and later
 dropped — the locked Airtable-removal redesign deleted it from the product
 before it was ever published, so it never became a cutover concern; see git
 history for that removal rather than a checklist item here. `events` moved
@@ -33,18 +34,25 @@ app's `server/config/reconcile.ts` and, as of the vinext-era redesign,
 `packages/devtools` too — both import the published `@devdogsuga/events`
 package.
 
-## The local-pack bridge
+Since then two CLIs and a headers package joined them: `devtools`,
+`backstage` (new, TASK-399) and `headers`. `cli-core` is the private shared core
+both CLIs inline with `tsdown`; `scripts/publish-changed-packages.mjs` skips it
+because it is `private`, and `scripts/check-bundle-imports.mjs` (run by both
+CLIs' `build`) fails the build if either bundle still imports it or any other
+undeclared package. `backstage` has never been on npm, so its first publish is
+done by hand (then configure its Trusted Publisher like the others); the
+script would pick it up on a run and publish it at `0.1.0`.
 
-Before the first real npm publish exists, `pnpm pack:local` (see
-`scripts/pack-local.mjs`) builds every publishable package and packs each into
-a stable-named, gitignored tarball under `.packs/` — e.g.
-`.packs/devdogsuga-db.tgz`. `DevDogsUGA` points pnpm `overrides` at these
-tarballs (a `file:` path into this checkout) to consume Backstage's packages
-today, without waiting on section A below. `pnpm pack` rewrites every
-`catalog:`/`workspace:*` specifier into the resolved version, so a tarball
-built this way is byte-for-byte what a real publish would produce for that
-package.json — this is a bridge, not a substitute for testing the real
-pipeline once it exists (see section C's note on that).
+The `devtools-ci` and `devtools-ci-bare` bins, the `db`/`cf`/`gen`/`emails`/
+`grant-root` aliases and the `./ci-alias` source entry are removed here: the
+DevDogsUGA cutover branch (TASK-403) stops calling all of them, so publish this
+only together with that push.
+
+## The local-pack bridge (retired)
+
+`pnpm pack:local` and `scripts/pack-local.mjs`, which packed every package into
+`.packs/` for DevDogsUGA's `overrides` to consume before the first npm publish,
+were deleted once packages were published. Git history has them.
 
 ---
 
@@ -55,7 +63,7 @@ are done.
 
 - [ ] Claim the `@devdogsuga` org on npmjs.com.
 - [ ] Create the GitHub remote for `Backstage` and push `main`.
-- [ ] First publish of each of the 8 packages. Trusted Publishing is configured
+- [ ] First publish of each of the 8 packages, and of `backstage` (the others are already on npm). Trusted Publishing is configured
       _on an existing package_, so it cannot mint the first version — either do
       one manual `npm publish` per package from a maintainer's machine with a
       real token, or use npm's "pending trusted publisher" flow if it is
@@ -288,6 +296,6 @@ are done.
 - [ ] Verify the publish pipeline end-to-end on the first real push. It has
       **never executed** — no remote exists — and
       `scripts/publish-changed-packages.mjs` documents its own v1 limitations
-      in its header. Treat the first run as untested code. `pnpm pack:local`
-      exercises the packing half of that pipeline today (see "The local-pack
-      bridge" above), but never the registry/OIDC half.
+      in its header. Treat the first run as untested code. The
+      packing half is exercised by the devtools contract tests; nothing
+      exercises the registry/OIDC half.
