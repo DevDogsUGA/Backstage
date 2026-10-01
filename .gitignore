@@ -7,7 +7,6 @@ dist/
 .turbo/
 .cache/
 .wrangler/
-.packs/
 .env
 .env.*
 !.env.example
