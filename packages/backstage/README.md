@@ -1,0 +1,147 @@
+# @devdogsuga/backstage
+
+The officer and production CLI: everything that needs production secrets and is
+used only by the two people who hold them (and CI), plus the tools that need
+only the user's own login. Run it anywhere:
+
+```bash
+pnpm dlx --config.minimum-release-age=0 --config.dlx-cache-max-age=0 @devdogsuga/backstage
+```
+
+It always runs the latest publish, CI included, so local runs and CI runs
+match. The two flags matter outside a DevDogsUGA checkout, where the workspace's
+`minimumReleaseAgeExclude` and `dlxCacheMaxAge: 0` do not apply (inside one,
+`pnpm backstage` is the script).
+
+It **starts without a checkout**. Help, `version`, `completions`, the tools
+below that need no secrets (`graphics`, `qr`, `github`, `newsletter`) and
+anything run with `--no-env` never look for one; a command that reads a checkout says
+"run this from inside a DevDogsUGA clone" and exits 1. The DevDogsUGA libraries
+it reads (`@devdogsuga/env`, `@devdogsuga/db`) are optional peers, resolved
+through the checkout by the commands that need them.
+
+```bash
+pnpm backstage                                   # no arguments: a menu
+pnpm backstage env pull --target production      # Bitwarden → .env.production
+pnpm backstage env audit --target production     # every store, plus orphaned Worker secrets
+pnpm backstage env audit --target production --prune
+pnpm backstage deploy platform --tier staging    # token check, secrets file, wrangler deploy
+pnpm backstage --no-env deploy write-env         # the CI steps that supply their own environment
+pnpm backstage --no-env planner status           # the preflight credential, from DB_URL
+pnpm backstage graphics 'event/*' --out ~/images # club images, no checkout
+pnpm backstage qr https://devdogsuga.org --format svg,png,webp --logo acm
+pnpm backstage newsletter send 3.0.1 --to a@uga.edu   # asks first; --yes with no terminal
+```
+
+## Commands
+
+| Command                                        | What it does                                                                           |
+| ---------------------------------------------- | -------------------------------------------------------------------------------------- |
+| `deploy <app> --tier <t>`                      | Checks `CLOUDFLARE_API_TOKEN`, writes the Worker's secrets file, deploys, removes it.  |
+| `deploy write-env`                             | Composes `.env.<DEPLOY_ENV>` from the GitHub environment.                              |
+| `deploy preflight`                             | Classifies the project: paused (skip) or broken (fail).                                |
+| `deploy plan`, `deploy migrate`                | Dry-run the migrations into the job summary; apply them to `DB_URL`.                   |
+| `deploy smoke --tier <t> [--app]`              | Public routes answer 200, the auth redirect works, this deploy's Sentry release shows. |
+| `deploy reconcile --tier <t>`                  | The platform's config reconcile, after the deploy (`CRON_SECRET`).                     |
+| `env pull\|push\|audit --target <t>`           | One env file per target, synced to Bitwarden and GitHub. `audit` lists orphans.        |
+| `planner status\|create\|reset-password\|drop` | The `migration_planner` role the preflight tier holds.                                 |
+| `graphics [graphic…]`                          | Club images from `@devdogsuga/brand`: `brand/*`, `app/*`, `event/*`.                   |
+| `qr <text>`                                    | QR codes with every option of `/console/qr`.                                           |
+| `github rulesets\|settings`                    | Diff (and with `--apply` write) GitHub config, through `gh`.                           |
+| `newsletter render\|draft\|send <issue…>`      | Changelog issues as files, mailbox drafts, or a send.                                  |
+
+`smoke` and `reconcile` replace DevDogsUGA's `packages/deploy-checks`. The
+per-app data (hosts, public paths, the protected path and its redirect) stays in
+DevDogsUGA, as a `smoke` field on each app's entry in `workers.json`:
+
+```json
+[
+  {
+    "path": "apps/platform",
+    "smoke": {
+      "hosts": {
+        "staging": "staging.devdogsuga.org",
+        "production": "devdogsuga.org"
+      },
+      "publicPaths": ["/", "/events"],
+      "protectedPath": "/console/permissions",
+      "protectedRedirectPrefix": "/auth"
+    }
+  },
+  "apps/sandbox"
+]
+```
+
+Entries may be bare paths or objects. While the field is absent, the table
+`deploy-checks` carried answers for `platform` and `schedule-builder`.
+
+## The tools that need no production secrets
+
+None of these reads an env file or needs a checkout, so the launcher skips env
+entry for them (`envFree` in the command tree).
+
+- **`graphics`** renders the brand, app and event images with
+  `@devdogsuga/brand/render`, reading meetings from the published
+  `@devdogsuga/events`. Files go to `--out` or the current directory, flat, as
+  `<name>-<format>.png`. There is no `page/*` group (the platform renders page
+  cards per request) and no `--default-out`.
+- **`qr`** takes its options from `qrRequestSchema` in `@devdogsuga/brand/qr`,
+  the same schema `/console/qr` parses, so a new option reaches both. Every
+  schema field has a flag (`qr/options.ts` is typed over the schema, and a test
+  checks it): content, `--size`, `--margin`, `--color`, `--background`,
+  `--gradient`, `--shape`, `--error-level`, `--qr-version`, `--logo` (a preset,
+  `none`, or an image file) with `--logo-size`, `--logo-padding` and
+  `--logo-crop x,y,w,h`, and `--format` with any of svg, png, jpg, webp, avif
+  and tiff at once. It prints the same scannability warning as the page.
+  `/console/qr` stays, deprecated; new options are CLI-only.
+- **`github rulesets|settings`** keep GitHub's rulesets and repository settings
+  as code, through `gh` and your own login. They must keep matching what the
+  platform's `server/github/rulesets.ts` and `teamSync.ts` assume.
+- **`newsletter render|draft|send`** are described in the
+  [newsletter package](../newsletter/README.md). Drafts and sends use the club
+  mailbox (`devdogs@uga.edu`) with the officer's own Microsoft sign-in; there
+  is no `--mailbox`. `send` needs `--to` and always asks first, naming the issue
+  and every recipient; with no terminal, `--yes` answers it. The sign-in
+  borrows Thunderbird's public client ID (see `src/newsletter/oauth.ts`); if
+  Microsoft or UGA's tenant blocks it, sending needs a club-owned app
+  registration.
+
+## Tiers, `--no-env`, CI
+
+Nothing is ever asked at launch. `--tier <t>` (anywhere in argv) or
+`DEPLOY_ENV` names the session's tier and so the env file loaded; with neither
+the session is plain development (where `BWS_ACCESS_TOKEN` lives). `deploy`
+refuses to run without one of the two.
+
+`--no-env` loads no env files and does not look for a checkout: the caller's
+environment is the environment. It is for `deploy write-env`, which creates the
+file tier resolution would otherwise insist on reading, and for CI steps that
+hold one narrow credential in the job's `env:` block.
+
+With no terminal, or `CI=true`: no menu, no banner, plain lines, errors on
+stderr, and every confirmation needs `--yes`. Against staging or production a
+command that is not read-only asks once first (`--yes` answers it).
+
+Each command checks for the secrets it uses up front: `deploy <app>` for
+`CLOUDFLARE_API_TOKEN`, `deploy reconcile` for `CRON_SECRET`, `env` for the
+Secrets Manager token (flag, environment, then the Bitwarden vault, which `env`
+signs in to and unlocks itself, then asking).
+
+## Layout
+
+Like devtools: `src/<domain>/catalog.ts` (inert data) and `commands.ts`;
+`src/catalog.ts` composes the tree, `src/cli.ts` maps names to handlers,
+`src/launch-core.ts` settles the tier before any command is imported. The
+shared core is the private `@devdogsuga/cli-core`, which `tsdown` inlines; every
+other import must be declared here, and the build fails when one is not.
+
+`env.ts` is the operator manifest (`BWS_ACCESS_TOKEN`, `CLOUDFLARE_API_TOKEN`
+and friends). It is a copy of devtools' own, kept identical by a test, because
+each CLI loads the one beside it.
+
+Contract tests (`pnpm test:contract`) pack the real tarball, install it with
+install scripts off outside any repo (and check the Bitwarden native module
+loads), and run it again inside the fixture repo. They gate publishing.
+
+Crash reporting is the same as devtools' (Sentry, scrubbed, off with
+`DEVTOOLS_TELEMETRY=0`); the release is named `backstage@<version>`.

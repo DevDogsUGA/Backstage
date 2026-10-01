@@ -8,21 +8,26 @@ import {
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it } from "vitest";
-import { findRepoRoot, resetRepoRootCacheForTests } from "../repo/root.js";
+import {
+  findRepoRoot,
+  resetRepoRootCacheForTests,
+} from "@devdogsuga/cli-core/repo/root";
 import { discoverWranglerConfigs, parseWrangler } from "./discovery.js";
 
 /**
  * Restored from DevDogsUGA's original `src/cron/discovery.test.ts` (see
  * `../../MOVED-TESTS.md`). The original asserted `discoverWranglerConfigs()`
  * against the real `apps/*` tree; this one asserts it against the committed
- * contract-test fixture (`test/fixture-repo/`), which ships exactly one app
+ * contract-test fixture (`cli-core/test-fixtures/fixture-repo/`), which ships exactly one app
  * (`demo-app`) with a real `wrangler.jsonc` — enough to exercise "discovered
  * by presence of the file, not an allowlist" without a real DevDogsUGA
  * checkout.
  */
 
-const FIXTURE_ROOT = new URL("../../test/fixture-repo/", import.meta.url)
-  .pathname;
+const FIXTURE_ROOT = new URL(
+  "../../../cli-core/test-fixtures/fixture-repo/",
+  import.meta.url,
+).pathname;
 
 describe("parseWrangler", () => {
   it("accepts JSONC without stripping // from URL strings", () => {

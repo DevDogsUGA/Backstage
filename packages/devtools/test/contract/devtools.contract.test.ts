@@ -5,7 +5,7 @@
  * Unlike the unit suite (`src/**\/*.test.ts`, `pnpm test`), these do not mock
  * the filesystem or `findRepoRoot()` — they `pnpm pack` the real package,
  * install the real tarball into a temp copy of the committed fixture repo
- * (`test/fixture-repo/`, a minimal DevDogsUGA-shaped pnpm workspace), and run
+ * (`packages/cli-core/test-fixtures/fixture-repo/`, a minimal DevDogsUGA-shaped pnpm workspace), and run
  * the real `bin/devtools.mjs` as a subprocess against it. This is the closest
  * thing to "does a fresh `pnpm dlx @devdogsuga/devtools` actually work" that
  * can run without a real npm publish.
@@ -28,6 +28,7 @@ import {
   existsSync,
   mkdtempSync,
   mkdirSync,
+  readdirSync,
   readFileSync,
   rmSync,
   writeFileSync,
@@ -41,7 +42,13 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 const HERE = dirname(fileURLToPath(import.meta.url));
 const DEVTOOLS_ROOT = join(HERE, "..", "..");
 const BACKSTAGE_ROOT = join(DEVTOOLS_ROOT, "..", "..");
-const FIXTURE_SRC = join(DEVTOOLS_ROOT, "test", "fixture-repo");
+const FIXTURE_SRC = join(
+  BACKSTAGE_ROOT,
+  "packages",
+  "cli-core",
+  "test-fixtures",
+  "fixture-repo",
+);
 
 const PACK_TIMEOUT_MS = 60_000;
 const INSTALL_TIMEOUT_MS = 5 * 60_000;
@@ -60,7 +67,7 @@ function requireBuilt(pkgDir: string, entry: string): void {
 /** `pnpm pack`s a workspace package into `destDir`, returning the tarball's
  * absolute path. Uses `pnpm pack` (not `npm pack`) so `workspace:`/`catalog:`
  * specifiers are rewritten to resolved versions, matching what a real
- * publish would produce — same mechanism `scripts/pack-local.mjs` uses. */
+ * publish would produce — the same mechanism the publish script uses. */
 function packPackage(pkgDir: string, destDir: string): string {
   const output = execFileSync("pnpm", ["pack", "--pack-destination", destDir], {
     cwd: pkgDir,
@@ -219,6 +226,8 @@ describe("devtools contract tests", () => {
         cwd: options?.cwd ?? fixtureDir,
         env: {
           ...process.env,
+          // Failure logs go in the temp dir, never the real home.
+          DEVTOOLS_LOG_DIR: join(tmpRoot, "default-logs"),
           ...options?.env,
         },
       });
@@ -244,6 +253,26 @@ describe("devtools contract tests", () => {
       });
     });
   }
+
+  it("ships a bundle with the private core inlined", () => {
+    // `@devdogsuga/cli-core` is a `workspace:*` devDependency that is never
+    // published, so any import of it left in `dist/` would fail on a real
+    // install. tsdown inlines it; this proves the packed tarball agrees.
+    const dist = join(
+      fixtureDir,
+      "node_modules",
+      "@devdogsuga",
+      "devtools",
+      "dist",
+    );
+    const files = readdirSync(dist).filter((name) => name.endsWith(".js"));
+    expect(files).toContain("launch.js");
+    const importsCore = /(?:from|import\()\s*["']@devdogsuga\/cli-core/;
+    for (const name of files) {
+      const imported = importsCore.test(readFileSync(join(dist, name), "utf8"));
+      expect(imported, `${name} imports the private core`).toBe(false);
+    }
+  });
 
   it("--help works from the fixture root", async () => {
     const { status, stdout } = await run(["--help"]);
@@ -341,5 +370,289 @@ describe("devtools contract tests", () => {
     );
     expect(status).not.toBe(0);
     expect(stderr).toContain("run this from inside a DevDogsUGA clone");
+  });
+
+  it("refuses to guess a tier when nobody can answer", async () => {
+    // The harness has no TTY, so this is the non-interactive path.
+    const { status, stderr } = await run(["cron", "list"], {
+      env: { DEPLOY_ENV: "", DEV_DB: "", CI: "" },
+    });
+    expect(status).toBe(1);
+    expect(stderr).toContain("no tier named");
+  });
+
+  it("refuses production without --yes before the tool is ever started", async () => {
+    // --no-env: there is no production env file in the fixture, and the gate
+    // must not depend on one.
+    const { status, stderr } = await run(
+      ["--no-env", "--tier", "production", "supabase", "db", "push"],
+      { env: { CI: "" } },
+    );
+    expect(status).toBe(1);
+    expect(stderr).toContain("without --yes");
+    expect(stderr).not.toContain("Ran:");
+  });
+
+  it("--no-env runs a command against a named tier without loading any env file", async () => {
+    const { status, stdout, stderr } = await run(
+      ["--no-env", "--tier", "development", "cron", "list"],
+      { env: { CI: "true" } },
+    );
+    expect(status).toBe(0);
+    expect(stdout).toContain("demo-app");
+    expect(stderr).not.toContain("loaded");
+  });
+
+  it("prints no banner without a terminal", async () => {
+    const { status, stdout } = await run(
+      ["env", "example", "--tier", "development"],
+      { env: { CI: "true" } },
+    );
+    expect(status).toBe(0);
+    expect(stdout).not.toContain("DevDogs devtools");
+  });
+
+  // ── --help --json ──────────────────────────────────────────────────────────
+
+  it("--help --json lists every command path, from outside any repo", async () => {
+    const { status, stdout } = await run(["--help", "--json"], {
+      cwd: tmpdir(),
+    });
+    expect(status).toBe(0);
+
+    const doc = JSON.parse(stdout) as {
+      version: string;
+      commands: { path: string; surface: string; deprecated?: string }[];
+    };
+    const byPath = new Map(doc.commands.map((c) => [c.path, c]));
+    for (const path of [
+      "setup",
+      "doctor",
+      "check migrations",
+      "check env",
+      "check workers",
+      "check scripts",
+      "supabase",
+      "preset apply-migrations",
+      "cron run",
+    ]) {
+      expect(byPath.has(path), path).toBe(true);
+    }
+    // The aliases kept for DevDogsUGA's main say what replaces them.
+    expect(byPath.has("db start")).toBe(false);
+    expect(byPath.get("run")?.deprecated).toContain("pnpm -r run");
+    // Hidden from the wizard, but still a supported command.
+    expect(byPath.get("completions")?.surface).toBe("cli-only");
+    // Gone.
+    for (const path of [
+      "persona",
+      "moderation check",
+      "db reset",
+      "cf build",
+    ]) {
+      expect(byPath.has(path), path).toBe(false);
+    }
+  });
+
+  // ── check ──────────────────────────────────────────────────────────────────
+
+  /** Rewrites a fixture file for the length of `body`, then puts it back. */
+  async function withFile(
+    path: string,
+    text: string,
+    body: () => Promise<void>,
+  ): Promise<void> {
+    const file = join(fixtureDir, path);
+    const original = readFileSync(file, "utf8");
+    writeFileSync(file, text);
+    try {
+      await body();
+    } finally {
+      writeFileSync(file, original);
+    }
+  }
+
+  it("check workers passes when workers.json, wrangler.jsonc and the deploy matrix agree", async () => {
+    const { status, stdout, stderr } = await run(["check", "workers"], {
+      env: { CI: "true" },
+    });
+    expect(stderr).toBe("");
+    expect(status).toBe(0);
+    expect(stdout).toContain("check workers: in step.");
+  });
+
+  it("check workers names the drift and exits 1", async () => {
+    await withFile("workers.json", "[]", async () => {
+      const { status, stderr } = await run(["check", "workers"], {
+        env: { CI: "true" },
+      });
+      expect(status).toBe(1);
+      expect(stderr).toContain(
+        "apps/demo-app has a wrangler.jsonc but is not in workers.json.",
+      );
+    });
+  });
+
+  it("check scripts passes on the fixture and refuses a script outside the vocabulary", async () => {
+    const ok = await run(["check", "scripts"], { env: { CI: "true" } });
+    expect(ok.status).toBe(0);
+
+    const manifest = join(fixtureDir, "apps", "demo-app", "package.json");
+    const original = JSON.parse(readFileSync(manifest, "utf8")) as object;
+    await withFile(
+      "apps/demo-app/package.json",
+      JSON.stringify({ ...original, scripts: { "cf:preview": "x" } }),
+      async () => {
+        const bad = await run(["check", "scripts"], { env: { CI: "true" } });
+        expect(bad.status).toBe(1);
+        expect(bad.stderr).toContain("apps/demo-app");
+        expect(bad.stderr).toContain("use `preview`");
+      },
+    );
+  });
+
+  it("check env loads the registry from the checkout's manifests", async () => {
+    // The fixture declares only a couple of variables, far under the floor
+    // that keeps the check from passing vacuously, so it fails; what matters
+    // is that it counted the manifests it found rather than crashing on them.
+    const { status, stderr } = await run(["check", "env"], {
+      env: { CI: "true" },
+    });
+    expect(stderr).not.toContain("failed to import");
+    expect(status).toBe(1);
+    expect(stderr).toMatch(/Only \d+ variables are declared/);
+  });
+
+  it("check migrations flags a new migration older than the base's newest", async () => {
+    const git = (...args: string[]): void => {
+      execFileSync(
+        "git",
+        ["-c", "user.name=t", "-c", "user.email=t@example.com", ...args],
+        { cwd: fixtureDir, stdio: "ignore" },
+      );
+    };
+    const migrations = join(fixtureDir, "supabase", "migrations");
+    mkdirSync(migrations, { recursive: true });
+    try {
+      git("init", "-b", "main");
+      writeFileSync(join(migrations, "20260301000000_platform_base.sql"), "");
+      writeFileSync(join(fixtureDir, ".gitignore"), "node_modules/\n");
+      git("add", ".gitignore", "supabase");
+      git("commit", "-m", "base");
+      git("checkout", "-b", "feature");
+      writeFileSync(join(migrations, "20260101000000_platform_late.sql"), "");
+      git("add", "supabase");
+      git("commit", "-m", "late");
+
+      const bad = await run(["check", "migrations", "--base", "main"], {
+        env: { CI: "true" },
+      });
+      expect(bad.status).toBe(1);
+      expect(bad.stderr).toContain("20260101000000_platform_late.sql");
+
+      git("checkout", "main");
+      const ok = await run(["check", "migrations", "--base", "main"], {
+        env: { CI: "true" },
+      });
+      expect(ok.status).toBe(0);
+      expect(ok.stdout).toContain("in order");
+    } finally {
+      rmSync(join(fixtureDir, ".git"), { recursive: true, force: true });
+      rmSync(join(fixtureDir, "supabase"), { recursive: true, force: true });
+      rmSync(join(fixtureDir, ".gitignore"), { force: true });
+    }
+  });
+
+  // ── cron contract (was repo-checks' live cron-contract test) ──────────────
+
+  it("cron list refuses a scheduled.ts that breaks the cron contract", async () => {
+    await withFile(
+      "apps/demo-app/cloudflare/scheduled.ts",
+      'export const CRON_ROUTES = { "*/30 * * * *": { routes: ["/cron/x"], label: "" } };\n',
+      async () => {
+        const { status, stderr, stdout } = await run(
+          ["cron", "list", "--tier", "development"],
+          { env: { CI: "true" } },
+        );
+        expect(status).not.toBe(0);
+        expect(`${stdout}${stderr}`.length).toBeGreaterThan(0);
+      },
+    );
+  });
+
+  // ── the deprecated run alias ───────────────────────────────────────────────
+
+  it("run names its replacement before it runs", async () => {
+    const { stderr } = await run(
+      ["run", "no-such-task", "--all", "--tier", "development"],
+      { env: { CI: "true", DEVTOOLS_TELEMETRY: "0" } },
+    );
+    expect(stderr).toContain("devtools run is deprecated.");
+    expect(stderr).toContain("pnpm -r run no-such-task");
+  });
+
+  // ── --dry-run, the failure log and the script picker ───────────────────────
+
+  it("--dry-run prints the tool call a passthrough would make and spawns nothing", async () => {
+    const { status, stderr } = await run(
+      ["--tier", "development", "--dry-run", "wrangler", "--version"],
+      { env: { CI: "true", DEVTOOLS_TELEMETRY: "0" } },
+    );
+    expect(status).toBe(0);
+    expect(stderr).toContain("Would run: pnpm exec wrangler --version");
+    expect(stderr).not.toContain("Ran:");
+  });
+
+  it("--dry-run stops a command that writes and says what it would run", async () => {
+    const { status, stderr } = await run(
+      [
+        "cron",
+        "run",
+        "--app",
+        "demo-app",
+        "--dry-run",
+        "--tier",
+        "development",
+      ],
+      { env: { CI: "true", DEVTOOLS_TELEMETRY: "0" } },
+    );
+    expect(status).toBe(0);
+    expect(stderr).toContain("Would run: devtools cron run --app demo-app");
+  });
+
+  it("a failed run writes a log and prints its path", async () => {
+    const logDir = join(tmpRoot, "logs");
+    const { status, stderr } = await run(
+      ["no-such-command", "--tier", "development"],
+      {
+        env: { CI: "true", DEVTOOLS_TELEMETRY: "0", DEVTOOLS_LOG_DIR: logDir },
+      },
+    );
+    expect(status).toBe(1);
+    expect(stderr).toContain("Log for #tech-support:");
+    const logs = readdirSync(logDir).filter((name) => name.endsWith(".log"));
+    expect(logs).toHaveLength(1);
+    const text = readFileSync(join(logDir, logs[0]!), "utf8");
+    expect(text).toContain("devtools no-such-command");
+    expect(text).toContain("exit code: 1");
+  });
+
+  it("script runs pnpm -F <package> run <script> and prints the command after", async () => {
+    const { status, stdout, stderr } = await run(
+      ["script", "demo-app", "build", "--tier", "development"],
+      { env: { CI: "true", DEVTOOLS_TELEMETRY: "0" } },
+    );
+    expect(status).toBe(0);
+    expect(stdout).toContain("hello from demo-app");
+    expect(stderr).toContain("Ran: pnpm -F demo-app run build");
+  });
+
+  it("script refuses a script the package does not have", async () => {
+    const { status, stderr } = await run(
+      ["script", "demo-app", "no-such-script", "--tier", "development"],
+      { env: { CI: "true", DEVTOOLS_TELEMETRY: "0" } },
+    );
+    expect(status).toBe(1);
+    expect(stderr).toContain('has no script "no-such-script"');
   });
 });

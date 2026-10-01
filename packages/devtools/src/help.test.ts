@@ -9,11 +9,14 @@
  * than it needs to" both fail silently.
  */
 import { describe, expect, it } from "vitest";
-import { helpPath, renderHelp } from "./help.js";
-import { allPaths, findCommand, SCOPES, TOP_LEVEL } from "./commands.js";
+import { helpPath, renderHelp } from "@devdogsuga/cli-core/help";
+import { SCOPES } from "@devdogsuga/cli-core/catalog";
+import { catalog } from "./catalog.js";
+
+const { allPaths, findCommand, topLevel: TOP_LEVEL } = catalog;
 
 describe("the top level", () => {
-  const root = renderHelp();
+  const root = renderHelp(catalog);
 
   it("fits on a screen", () => {
     // The old one was 190. A bound rather than a snapshot: this should be free
@@ -30,48 +33,40 @@ describe("the top level", () => {
   });
 
   /**
-   * The merged "Database" group renders as a single plain line at the root —
-   * `db` is its only command, and a group with no scoped commands of its own
-   * gets no headings. The four layers `db` spans now show up one level down,
-   * in `db --help`, tested next.
+   * The scoped lines are the presets', one level down in `preset --help`, so
+   * the root stays a plain list with no scope headings.
    */
-  it("renders db as a plain root entry without its internal scopes", () => {
-    const start = root.indexOf("\nRuntime & infrastructure:");
-    const end = root.indexOf("\n\n", start + 1);
-    const database = root.slice(start, end === -1 ? undefined : end);
-    // `split("\n")` on a string starting with "\n" gives ["", "Database:", …];
-    // skip both the empty leader and the heading itself.
-    const entries = database.split("\n").slice(2).filter(Boolean);
-
-    expect(database).not.toContain(SCOPES.machine.help);
-    expect(entries.some((entry) => entry.includes("db"))).toBe(true);
+  it("renders the presets as a plain root entry without their scopes", () => {
+    expect(root).not.toContain(`${SCOPES.repo.help}:`);
+    expect(root).toContain("preset");
   });
 
   /**
-   * "db" names both the containers and the database inside them, and
-   * `restart` and `reset` act on one each. The headings are what stop a
-   * fifteen-line list from making the reader guess which is which.
+   * Each preset names the layer it acts on, and the headings are what stop a
+   * short list from making the reader guess which is which.
    */
-  it("heads each layer of db, in scope order", () => {
-    const db = renderHelp(["db"]);
-    const machine = db.indexOf(SCOPES.machine.help);
-    const repo = db.indexOf(SCOPES.repo.help);
-    const endpoint = db.indexOf(SCOPES.endpoint.help);
-    const infra = db.indexOf(SCOPES.infra.help);
+  it("heads each layer of preset, in scope order", () => {
+    const preset = renderHelp(catalog, ["preset"]);
+    const repo = preset.indexOf(SCOPES.repo.help);
+    const endpoint = preset.indexOf(SCOPES.endpoint.help);
 
-    // Machine, then repo, then endpoint, then infra — declaration order.
-    expect(machine).toBeGreaterThan(-1);
-    expect(repo).toBeGreaterThan(machine);
+    expect(repo).toBeGreaterThan(-1);
     expect(endpoint).toBeGreaterThan(repo);
-    expect(infra).toBeGreaterThan(endpoint);
+  });
+
+  it("marks a deprecated command and says what replaces it", () => {
+    expect(renderHelp(catalog)).toMatch(/run .*\(deprecated\)/);
+    expect(renderHelp(catalog, ["run"])).toContain(
+      "Deprecated. Use `pnpm -r run <task>`",
+    );
   });
 
   it("leaves a single-scope group unheaded", () => {
-    // Groups that span only one layer (like Moderation) should not have a
-    // scope heading — every entry would sit under it and the heading adds noise.
+    // Groups that span only one layer should not have a scope heading —
+    // every entry would sit under it and the heading adds noise.
     // Structural rather than "contains no colon": a summary may hold one.
     const body = root
-      .slice(root.indexOf("\nModeration:") + 1)
+      .slice(root.indexOf("\nEnvironment:") + 1)
       .split("\n\n")[0]!
       .split("\n")
       .slice(1);
@@ -139,31 +134,31 @@ describe("the top level", () => {
 
 describe("a level down", () => {
   it("lists a group's subcommands and stops", () => {
-    const env = renderHelp(["env"]);
-    expect(env).toContain("pull");
-    expect(env).toContain("audit");
+    const env = renderHelp(catalog, ["env"]);
+    expect(env).toContain("init");
+    expect(env).toContain("example");
     // env's own options belong to its subcommands, not to `env`.
-    expect(env).not.toContain("--access-token");
+    expect(env).not.toContain("--apps");
     expect(env.split("\n").length).toBeLessThan(20);
   });
 
   it("lists a leaf's options and has no subcommand section", () => {
-    const pull = renderHelp(["env", "pull"]);
-    expect(pull).toContain("--target");
-    expect(pull).toContain("--access-token");
-    expect(pull).not.toContain("Subcommands:");
+    const init = renderHelp(catalog, ["env", "init"]);
+    expect(init).toContain("--target");
+    expect(init).toContain("--apps");
+    expect(init).not.toContain("Subcommands:");
   });
 
   it("renders every path in the tree", () => {
     for (const path of allPaths()) {
-      const text = renderHelp(path);
+      const text = renderHelp(catalog, path);
       expect(text, path.join(" ")).toContain(findCommand(path)!.summary);
       expect(text, path.join(" ")).toContain(`pnpm devtools ${path.join(" ")}`);
     }
   });
 
   it("falls back to the top level for a name that is not a command", () => {
-    expect(renderHelp(["nonsense"])).toBe(renderHelp());
+    expect(renderHelp(catalog, ["nonsense"])).toBe(renderHelp(catalog));
   });
 });
 

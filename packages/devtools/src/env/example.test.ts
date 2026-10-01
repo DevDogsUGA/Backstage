@@ -3,7 +3,7 @@
  *
  * Restored from DevDogsUGA's original `src/env/example.test.ts` (see
  * `../../MOVED-TESTS.md`). Points `DEVTOOLS_TEST_REPO_ROOT` at the committed
- * contract-test fixture (`test/fixture-repo/`, extended with the
+ * contract-test fixture (`cli-core/test-fixtures/fixture-repo/`, extended with the
  * `demo-registry` package) plus devtools' own always-loaded operator
  * manifest, instead of DevDogsUGA's real ~50-key registry.
  *
@@ -47,9 +47,9 @@ import {
 import {
   resetEnvSyncCacheForTests,
   resetPeerCacheForTests,
-} from "../repo/peers.js";
-import { resetRepoRootCacheForTests } from "../repo/root.js";
-import { loadRegistry } from "./discovery.js";
+} from "@devdogsuga/cli-core/repo/peers";
+import { resetRepoRootCacheForTests } from "@devdogsuga/cli-core/repo/root";
+import { loadRegistry } from "@devdogsuga/cli-core/env/discovery";
 import {
   keysForSections,
   renderExample,
@@ -59,8 +59,10 @@ import {
 } from "./example.js";
 
 const DATE = "2026-08-16";
-const FIXTURE_ROOT = new URL("../../test/fixture-repo/", import.meta.url)
-  .pathname;
+const FIXTURE_ROOT = new URL(
+  "../../../cli-core/test-fixtures/fixture-repo/",
+  import.meta.url,
+).pathname;
 const previousRoot = process.env.DEVTOOLS_TEST_REPO_ROOT;
 
 beforeAll(async () => {

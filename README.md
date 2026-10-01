@@ -12,6 +12,10 @@ secrets, or user-facing content.
   (or, eventually, anyone) can `pnpm add @devdogsuga/<package>`. Wave 1
   migrated `config`, `telemetry`, `env`, `db`, `brand`, and `newsletter` here from DevDogsUGA's `packages/`; `events` followed after,
   once `packages/events` in the product repo was ready to move out entirely.
+  The two CLIs live here too: `@devdogsuga/devtools` (contributors, needs a
+  DevDogsUGA checkout) and `@devdogsuga/backstage` (officers, production and CI,
+  runs anywhere through `pnpm dlx`). They share the private `@devdogsuga/cli-core`,
+  which `tsdown` inlines into both and which is never published.
   See `CUTOVER.md` for the migrated-from sha and what stays forward-ported.
 - **DevDogsUGA keeps anything a contributor authors** — app code, page
   templates, email/OG templates, the env variable _registry_ (the values;

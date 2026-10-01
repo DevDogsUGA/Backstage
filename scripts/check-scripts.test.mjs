@@ -28,7 +28,6 @@ const FAMILIES = /^(test|check|types|fetch|populate):[\w-]+(:[\w-]+)*$/;
 const ALLOWED = {
   // Backstage-specific commands with no vocabulary equivalent.
   "build:slides": "root: builds the slides app only (CI builds it separately)",
-  newsletter: "root: shortcut to the newsletter CLI",
   "slides#follow": "run a deck on a demo laptop",
   "slides#export:md": "export a deck to docs pages",
   "slides#tag-steps": "tag workshop repo steps from a deck",
@@ -36,12 +35,10 @@ const ALLOWED = {
   "slides#deploy": "deploy the slides Worker",
   "workshops#watch": "rebuild the VS Code extension on change",
   "workshops#package": "package the VS Code extension (.vsix)",
-  // packages/devtools and packages/newsletter-cli are being restructured by
-  // TASK-398, which owns their script names; drop these when it lands.
-  "@devdogsuga/devtools#cli": "TASK-398",
-  "@devdogsuga/devtools#ci": "TASK-398",
-  "@devdogsuga/devtools#ci:env": "TASK-398",
-  "@devdogsuga/newsletter-cli#cli": "TASK-398",
+  // The built CLIs, run from a checkout (`pnpm -F <package> cli …`).
+  "@devdogsuga/devtools#cli": "run the built devtools CLI from the source tree",
+  "@devdogsuga/backstage#cli":
+    "run the built backstage CLI from the source tree",
 };
 
 function manifests() {

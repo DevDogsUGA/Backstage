@@ -18,15 +18,16 @@
  * The local run path pre-flights the target origin and, if nothing is
  * listening, prints a tailored hint rather than a raw ECONNREFUSED.
  */
+import { DONE, type CommandHandler } from "@devdogsuga/cli-core/dispatch";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { confirm, select } from "@clack/prompts";
 import { parse as parseEnv } from "dotenv";
-import { loadEnvLoad } from "../repo/peers.js";
-import { findRepoRoot } from "../repo/root.js";
-import { positionals } from "../args.js";
-import { resolveTier } from "../tier.js";
-import { unwrap } from "../ui.js";
+import { loadEnvLoad } from "@devdogsuga/cli-core/repo/peers";
+import { findRepoRoot } from "@devdogsuga/cli-core/repo/root";
+import { positionals } from "@devdogsuga/cli-core/args";
+import { resolveTier } from "@devdogsuga/cli-core/tier";
+import { unwrap } from "@devdogsuga/cli-core/ui";
 import {
   CRON_TIERS,
   cronsForTier,
@@ -500,3 +501,21 @@ function parseCronRunOptions(argv: readonly string[]): CronRunOptions {
   }
   return opts;
 }
+
+export const handleCron: CommandHandler = async (rest) => {
+  const sub = rest[0];
+  const cronArgs = rest.slice(1);
+  let code: number;
+  if (sub === "list") {
+    code = await runCronList(cronArgs);
+  } else if (sub === "run") {
+    code = await runCronRun(cronArgs);
+  } else {
+    process.stderr.write(
+      `devtools cron: unknown subcommand "${sub ?? "(none)"}". Expected: list or run.\n`,
+    );
+    code = 1;
+  }
+  process.exitCode = code;
+  return DONE;
+};

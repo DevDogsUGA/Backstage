@@ -14,8 +14,8 @@
  * `name` as `<schema>_<description>` and hand it off unchanged.
  */
 import { select, text } from "@clack/prompts";
-import { unwrap } from "../ui.js";
-import { supabase } from "./run.js";
+import { unwrap } from "@devdogsuga/cli-core/ui";
+import { supabase } from "@devdogsuga/cli-core/db/run";
 
 /** App slug -> Postgres schema name. Schedule Builder and Study Group
  * Finder use underscores; their slugs use hyphens. */
@@ -64,7 +64,7 @@ export async function runNewMigration(
   const app = appArg ?? (await pickApp());
   if (!APP_SCHEMAS[app]) {
     process.stderr.write(
-      `devtools db migration new: unknown app "${app}". Expected one of: ${Object.keys(APP_SCHEMAS).join(", ")}.\n`,
+      `devtools preset new-migration: unknown app "${app}". Expected one of: ${Object.keys(APP_SCHEMAS).join(", ")}.\n`,
     );
     return 1;
   }
@@ -82,7 +82,7 @@ export async function runNewMigration(
   const name = migrationName(app, description);
   if (!name) {
     process.stderr.write(
-      "devtools db migration new: the description left nothing usable in the filename.\n",
+      "devtools preset new-migration: the description left nothing usable in the filename.\n",
     );
     return 1;
   }

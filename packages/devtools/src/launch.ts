@@ -48,60 +48,54 @@
  * already been made, and `resolveTier` (see `tier.ts`) falls back to reading
  * it off `process.env.DEPLOY_ENV` rather than asking again.
  */
-import { select } from "@clack/prompts";
 import type { DeployEnvironment } from "@devdogsuga/env";
 import type { DevDatabase } from "@devdogsuga/env/load";
-import type { TierChoice } from "@devdogsuga/env/session";
-import { findCommand } from "./commands.js";
+import { helpPath } from "@devdogsuga/cli-core/help";
+import { catalog } from "./catalog.js";
 import {
   enterSessionEnvironment,
   realEnvEntryDeps,
   setMenuEnvHook,
-} from "./env-entry.js";
-import { bareGroupStartPath } from "./menu.js";
+} from "@devdogsuga/cli-core/env-entry";
+import { nonEmpty } from "@devdogsuga/cli-core/db/connection";
+import { bareGroupStartPath } from "@devdogsuga/cli-core/menu";
+import {
+  isDryRun,
+  resolveDryRun,
+  setDryRun,
+} from "@devdogsuga/cli-core/dry-run";
+import { installFailureLog } from "@devdogsuga/cli-core/failure-log";
+import {
+  hasYes,
+  isNonInteractive,
+  stripNoEnvFlag,
+  stripTierFlag,
+} from "@devdogsuga/cli-core/mode";
+import { promptTier, resolveWithoutEnv } from "@devdogsuga/cli-core/session";
+import {
+  gateHostedTier,
+  GATE_PASSED_ENV,
+} from "@devdogsuga/cli-core/safety-gate";
 import {
   discoverRepoRoot,
   findRepoRoot,
   RepoNotFoundError,
-} from "./repo/root.js";
-import { loadEnvLoad, loadEnvSession } from "./repo/peers.js";
-import { captureDevtoolsError, initDevtoolsTelemetry } from "./telemetry.js";
-import { ignoreClosedPipes } from "./pipes.js";
-import { errorMessage, unwrap } from "./ui.js";
+} from "@devdogsuga/cli-core/repo/root";
+import { loadEnvLoad, loadEnvSession } from "@devdogsuga/cli-core/repo/peers";
+import {
+  captureDevtoolsError,
+  initDevtoolsTelemetry,
+  lastSentryEventId,
+} from "@devdogsuga/cli-core/telemetry";
+import { ignoreClosedPipes } from "@devdogsuga/cli-core/pipes";
+import { errorMessage } from "@devdogsuga/cli-core/ui";
 
-/**
- * Pulls a global `--tier <t>` out of `argv`, wherever it sits, leaving every
- * other argument untouched and in its original order. Exported for its own
- * unit tests; `launch()` below is the only real caller.
- */
-export function stripTierFlag(argv: readonly string[]): {
-  explicit: string | undefined;
-  rest: string[];
-} {
-  const rest = [...argv];
-  const index = rest.indexOf("--tier");
-  if (index === -1) return { explicit: undefined, rest };
-  const value = rest[index + 1];
-  // A trailing `--tier` with nothing after it removes just the flag; the
-  // missing value then reaches `resolveSessionTier` as `explicit: undefined`,
-  // which falls through to `DEPLOY_ENV`/the sole tier/the prompt exactly as
-  // if `--tier` had never been typed, rather than this function guessing.
-  //
-  // A following token that is itself a flag is treated the same way, NOT
-  // consumed as the value — the guard every other flag-value reader in this
-  // CLI keeps (`cli.ts`'s `flagValue`). Without it,
-  // `--tier --help` or `--tier -h` would swallow the flag as a bogus tier and
-  // refuse with "unknown tier" instead of reaching the help bypass below.
-  const missing = value === undefined || value.startsWith("-");
-  rest.splice(index, missing ? 1 : 2);
-  return { explicit: missing ? undefined : value, rest };
-}
+export { stripTierFlag };
 
 /**
  * Whether the command `rest` dispatches to is declared `envFree` in
- * `commands.ts`'s catalog — the leading run of non-flag tokens is the
- * command path (`["github", "rulesets"]` out of `["github", "rulesets",
- * "--apply"]`), the same convention `stripTierFlag` already uses for
+ * the command catalog — the leading run of non-flag tokens is the
+ * command path (`["oauth"]` out of `["oauth", "--json"]`), the same convention `stripTierFlag` already uses for
  * pulling a flag out of argv wherever it sits.
  *
  * Catalog-driven rather than a second hardcoded name list: `setup` and
@@ -109,26 +103,28 @@ export function stripTierFlag(argv: readonly string[]): {
  * resolution for a DIFFERENT reason worth spelling out at the call site —
  * see the comment above), but a plain "this command touches no env at all"
  * exemption reads once, from the same tree `--help` and the wizard already
- * render, rather than as a name a future GitHub-only command has to
+ * render, rather than as a name a future env-free command has to
  * remember to add here too.
  */
 function isEnvFreeCommand(rest: readonly string[]): boolean {
-  const path: string[] = [];
-  for (const arg of rest) {
-    if (arg.startsWith("-")) break;
-    path.push(arg);
-  }
-  return findCommand(path)?.envFree === true;
+  return catalog.findCommand(helpPath(rest))?.envFree === true;
 }
 
-/** The real interactive picker: a clack `select`, unwrapped so Ctrl-C exits
- * cleanly instead of leaking a cancel symbol into `resolveSessionTier`.
- * Values are session selector words (`"development:local"`, `"staging"`…). */
-async function promptTier(
-  message: string,
-  choices: TierChoice[],
-): Promise<string> {
-  return unwrap(await select<string>({ message, options: choices }));
+/**
+ * Whether the command reads nothing but the checkout, so the session behaves
+ * as if `--no-env` was typed: development is named and no env file is
+ * looked for or complained about. The `check` commands, which CI runs on a
+ * runner that has no `.env` at all.
+ */
+function skipsEnvEntry(rest: readonly string[]): boolean {
+  return catalog.findCommand(helpPath(rest))?.noEnv === true;
+}
+
+/** The offer's stack start (`env-entry.ts` holds the TTY prompt, this holds
+ * the lifecycle command), imported lazily like the rest of the commands. */
+async function startStack(): Promise<{ code: number; lines: string[] }> {
+  const { runStackCommand } = await import("./db/stack.js");
+  return runStackCommand("start");
 }
 
 /**
@@ -151,6 +147,37 @@ async function dispatch(argv: string[]): Promise<void> {
 }
 
 /**
+ * Runs `proceed` only if the hosted-tier gate lets the command through (see
+ * `@devdogsuga/cli-core/safety-gate`). Called after the environment is
+ * entered, so the project ref it shows is the tier's own. A command the gate
+ * stops exits non-zero and returns `blocked`.
+ */
+async function gated<T>(
+  tier: DeployEnvironment,
+  commandArgv: readonly string[],
+  proceed: () => Promise<T>,
+  blocked: T,
+): Promise<T> {
+  // A dry run spawns and writes nothing, so there is nothing to confirm.
+  if (isDryRun()) return proceed();
+  const outcome = await gateHostedTier({
+    tier,
+    projectRef: nonEmpty(process.env.PROJECT_REF),
+    argv: commandArgv,
+    yes: hasYes(commandArgv),
+    nonInteractive: isNonInteractive(),
+  });
+  if (!outcome.proceed) {
+    process.exitCode = 1;
+    return blocked;
+  }
+  // A devtools run started by this one inherits the answer instead of asking
+  // again.
+  process.env[GATE_PASSED_ENV] = tier;
+  return proceed();
+}
+
+/**
  * Resolves the session's deploy tier, enters it (or defers entry to the
  * menu — see this file's header), and hands off to `cli.ts`.
  *
@@ -159,7 +186,11 @@ async function dispatch(argv: string[]): Promise<void> {
  * nothing this function could return that would mean anything.
  */
 export async function launch(argv: readonly string[]): Promise<void> {
-  const { explicit, rest } = stripTierFlag(argv);
+  const { noEnv, rest: withoutNoEnv } = stripNoEnvFlag(argv);
+  const { explicit, rest: withoutTier } = stripTierFlag(withoutNoEnv);
+  const { dryRun, rest } = resolveDryRun(withoutTier);
+  setDryRun(dryRun);
+  installFailureLog({ argv, eventId: lastSentryEventId });
 
   // Here rather than only in `cli.ts`'s `main()`, so a failure while
   // resolving or entering the tier below is reported too. `main()`'s own
@@ -177,7 +208,8 @@ export async function launch(argv: readonly string[]): Promise<void> {
   // bareGroupStartPath(argv) : null`.
   const isMenuInvocation =
     rest.length === 0 ||
-    (process.stdin.isTTY === true && bareGroupStartPath(rest) !== null);
+    (process.stdin.isTTY === true &&
+      bareGroupStartPath(catalog, rest) !== null);
 
   // `--help`/`-h` bypasses tier resolution entirely, BEFORE it can refuse.
   // `cli.ts`'s own `main()` already answers these with no env in play (see
@@ -191,6 +223,13 @@ export async function launch(argv: readonly string[]): Promise<void> {
   // before ever reaching its `--help` branch, so routing straight to `main()`
   // below reproduces that passthrough correctly either way.
   if (rest.includes("--help") || rest.includes("-h")) {
+    await dispatch(rest);
+    return;
+  }
+
+  // `version` prints one line and reads nothing; asking about production first
+  // would be absurd.
+  if (rest[0] === "version") {
     await dispatch(rest);
     return;
   }
@@ -237,11 +276,9 @@ export async function launch(argv: readonly string[]): Promise<void> {
     //     machines of the people working on the deploy workflow.
     //
     // A third, open-ended case joins them here via `isEnvFreeCommand`:
-    // `github rulesets` and `github settings` (TASK-322, TASK-342) touch no
-    // DevDogsUGA env file or database at all — every write either one makes
-    // is a `gh api` call resolved from its own `--org`/`--repo` flags — so
-    // demanding a `--tier` before either could run was never a real
-    // requirement, only every command sharing one dispatch gate. See
+    // `oauth` and the `check` commands touch no DevDogsUGA env file or
+    // database at all, so demanding a `--tier` before they could run was
+    // never a real requirement, only every command sharing one dispatch gate. See
     // `isEnvFreeCommand`'s own doc for why this is catalog-driven rather
     // than a third name joining the `rest[0] ===` checks above.
     //
@@ -264,8 +301,26 @@ export async function launch(argv: readonly string[]): Promise<void> {
     // actually land on BARE development — an explicit staging/production or
     // qualified selector, an already-deployed DEPLOY_ENV, or a DEV_DB answer
     // all settle the question without them, and the lookup imports dotenvx.
+    // Non-interactive runs never guess: with nobody to ask, an unnamed tier
+    // would silently become whichever env file happens to be on the machine.
+    if (
+      isNonInteractive() &&
+      rest.length > 0 &&
+      explicit === undefined &&
+      !process.env.DEPLOY_ENV &&
+      !process.env.DEV_DB
+    ) {
+      process.stderr.write(
+        "devtools: no tier named. With no terminal (or CI=true) the tier must " +
+          "be explicit: pass --tier <development:local|development:remote|staging|production> " +
+          "or set DEPLOY_ENV.\n",
+      );
+      process.exit(1);
+    }
+
     const deployEnv = process.env.DEPLOY_ENV ?? "";
     const couldBeBareDevelopment =
+      !noEnv &&
       (process.env.DEV_DB ?? "") === "" &&
       (explicit === "development" ||
         (explicit === undefined &&
@@ -278,17 +333,21 @@ export async function launch(argv: readonly string[]): Promise<void> {
         ? await envLoad.probeLocalStack()
         : undefined;
 
-    const resolution = await envSession.resolveSessionTier({
-      explicit,
-      deployEnv: process.env.DEPLOY_ENV,
-      devDb: process.env.DEV_DB,
-      available: await envSession.availableTiers(findRepoRoot()),
-      isTTY: process.stdin.isTTY === true,
-      prompt: promptTier,
-      promptMessage: "Which environment should this session use?",
-      remoteCandidate,
-      localStackOnline,
-    });
+    // `--no-env`: the caller supplies the environment, so there are no env
+    // files to look for and no picker to show. The tier is whatever it names.
+    const resolution = noEnv
+      ? resolveWithoutEnv(envSession, explicit)
+      : await envSession.resolveSessionTier({
+          explicit,
+          deployEnv: process.env.DEPLOY_ENV,
+          devDb: process.env.DEV_DB,
+          available: await envSession.availableTiers(findRepoRoot()),
+          isTTY: process.stdin.isTTY === true,
+          prompt: promptTier,
+          promptMessage: "Which environment should this session use?",
+          remoteCandidate,
+          localStackOnline,
+        });
 
     if (!resolution.ok) {
       process.stderr.write(`devtools: ${resolution.reason}\n`);
@@ -313,11 +372,23 @@ export async function launch(argv: readonly string[]): Promise<void> {
         tier,
         devDatabase,
         commandArgv,
-        realEnvEntryDeps(envLoad, envSession),
-        dispatchCommand,
+        realEnvEntryDeps(envLoad, envSession, startStack),
+        () => gated(tier, commandArgv, dispatchCommand, null),
       ),
     );
     await dispatch(rest);
+    return;
+  }
+
+  const run = (): Promise<void> =>
+    gated(tier, rest, () => dispatch(rest), undefined);
+
+  if (noEnv || skipsEnvEntry(rest)) {
+    // The caller's environment is the environment: name the session, load
+    // nothing.
+    process.env.DEPLOY_ENV = tier;
+    if (devDatabase !== undefined) process.env.DEV_DB = devDatabase;
+    await run();
     return;
   }
 
@@ -328,8 +399,8 @@ export async function launch(argv: readonly string[]): Promise<void> {
     tier,
     devDatabase,
     rest,
-    realEnvEntryDeps(envLoad, envSession),
-    () => dispatch(rest),
+    realEnvEntryDeps(envLoad, envSession, startStack),
+    run,
   );
 }
 

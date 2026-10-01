@@ -4,14 +4,14 @@
  * The claim under test is the one the menu exists for: **every interactive
  * command in the tree is reachable from it, and the argv a walk produces is one the CLI
  * accepts.** The menu this replaced could not make that claim. It held ten
- * hand-written entries beside a CLI with sixteen top-level commands, so `env`,
- * `planner` and `docs index` had no way in.
+ * hand-written entries beside a CLI with sixteen top-level commands, so `env`
+ * and `docs index` had no way in.
  *
  * `@clack/prompts` is mocked rather than driven: the point is which questions
  * get asked and what argv comes out, not how a terminal renders them.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Environment } from "./environment.js";
+import type { Environment } from "@devdogsuga/cli-core/environment";
 
 const answers: unknown[] = [];
 const asked: string[] = [];
@@ -65,11 +65,14 @@ vi.mock("@clack/prompts", () => {
   };
 });
 
-const { runMenu, bareGroupStartPath } = await import("./menu.js");
-const { GROUPS, TOP_LEVEL, allPaths, findCommand, groupOf } =
-  await import("./commands.js");
-const { UNKNOWN_ENVIRONMENT } = await import("./environment.js");
-const { setMenuEnvHook, takeMenuEnvHook } = await import("./env-entry.js");
+const { runMenu, bareGroupStartPath } =
+  await import("@devdogsuga/cli-core/menu");
+const { catalog, GROUPS } = await import("./catalog.js");
+const { topLevel: TOP_LEVEL, allPaths, findCommand, groupOf } = catalog;
+const { UNKNOWN_ENVIRONMENT } =
+  await import("@devdogsuga/cli-core/environment");
+const { setMenuEnvHook, takeMenuEnvHook } =
+  await import("@devdogsuga/cli-core/env-entry");
 
 /**
  * Runs one walk with the given answers, returning the argv it dispatched.
@@ -90,17 +93,21 @@ async function walk(
   answers.push(...scripted);
 
   let dispatched: string[] | null = null;
-  await runMenu((argv) => {
-    dispatched = argv;
-    return Promise.resolve("Done.");
-  }, env);
+  await runMenu(
+    catalog,
+    (argv) => {
+      dispatched = argv;
+      return Promise.resolve("Done.");
+    },
+    env,
+  );
   return dispatched;
 }
 
 /**
  * Runs one walk resumed at `startPath`, mirroring `walk` above but through
  * `runMenu`'s `options.startPath` instead of `pickGroup`. What `main()` does
- * for a bare command group — `devtools db` — at a terminal.
+ * for a bare command group — `devtools preset` — at a terminal.
  */
 async function resume(
   startPath: string[],
@@ -114,6 +121,7 @@ async function resume(
 
   let dispatched: string[] | null = null;
   await runMenu(
+    catalog,
     (argv) => {
       dispatched = argv;
       return Promise.resolve("Done.");
@@ -199,15 +207,6 @@ describe("reach", () => {
 });
 
 describe("options become argv", () => {
-  it("lets images ask for graphic, format, and output in CLI order", async () => {
-    const argv = await walk([groupOf("images")!, findCommand(["images"])!]);
-    expect(argv).toEqual(["images"]);
-    expect(asked).toEqual([
-      "What would you like to do?",
-      "Content & communications:",
-    ]);
-  });
-
   it("adds a flag when the confirm is answered yes", async () => {
     const argv = await walk([
       groupOf("env")!,
@@ -228,16 +227,6 @@ describe("options become argv", () => {
     expect(argv).toEqual(["env", "example"]);
   });
 
-  it("emits --target remote for docs index's acknowledgment select", async () => {
-    const argv = await walk([
-      groupOf("docs")!,
-      findCommand(["docs"])!,
-      findCommand(["docs", "index"])!,
-      "remote",
-    ]);
-    expect(argv).toEqual(["docs", "index", "--target", "remote"]);
-  });
-
   it("emits a select choice that is a value after its flag", async () => {
     const argv = await walk([
       groupOf("completions")!,
@@ -245,17 +234,6 @@ describe("options become argv", () => {
       "bash",
     ]);
     expect(argv).toEqual(["completions", "--shell", "bash"]);
-  });
-
-  it("drops an optional text answered blank", async () => {
-    const argv = await walk([
-      groupOf("db")!,
-      findCommand(["db"])!,
-      findCommand(["db", "planner"])!,
-      findCommand(["db", "planner", "status"])!,
-      "  ",
-    ]);
-    expect(argv).toEqual(["db", "planner", "status"]);
   });
 });
 
@@ -287,32 +265,35 @@ describe("entered-tier recording", () => {
 
   it("records the ambient DEPLOY_ENV as the entered tier", async () => {
     process.env.DEPLOY_ENV = "staging";
-    const { reproducibleCommand } = await import("./invocation.js");
-    await walk(answersFor(["db", "status"]));
+    const { reproducibleCommand } =
+      await import("@devdogsuga/cli-core/invocation");
+    await walk(answersFor(["preset", "restart-stack"]));
     expect(reproducibleCommand()).toBe(
-      "pnpm devtools --tier staging db status",
+      "pnpm devtools --tier staging preset restart-stack",
     );
   });
 
   it("records nothing extra for the development default", async () => {
     delete process.env.DEPLOY_ENV;
     delete process.env.DEV_DB;
-    const { reproducibleCommand } = await import("./invocation.js");
-    await walk(answersFor(["db", "status"]));
-    expect(reproducibleCommand()).toBe("pnpm devtools db status");
+    const { reproducibleCommand } =
+      await import("@devdogsuga/cli-core/invocation");
+    await walk(answersFor(["preset", "restart-stack"]));
+    expect(reproducibleCommand()).toBe("pnpm devtools preset restart-stack");
   });
 
   it("records the qualified selector for a development session with DEV_DB", async () => {
     // Reproducing a session that ANSWERED the development-database question
-    // with a bare `pnpm devtools db status` would re-ask it (or refuse,
+    // with a bare `pnpm devtools preset restart-stack` would re-ask it (or refuse,
     // non-interactively) on the same machine — the hint must carry the whole
     // session.
     delete process.env.DEPLOY_ENV;
     process.env.DEV_DB = "remote";
-    const { reproducibleCommand } = await import("./invocation.js");
-    await walk(answersFor(["db", "status"]));
+    const { reproducibleCommand } =
+      await import("@devdogsuga/cli-core/invocation");
+    await walk(answersFor(["preset", "restart-stack"]));
     expect(reproducibleCommand()).toBe(
-      "pnpm devtools --tier development:remote db status",
+      "pnpm devtools --tier development:remote preset restart-stack",
     );
   });
 });
@@ -323,36 +304,34 @@ describe("bareGroupStartPath", () => {
   // …?" refusal. Pure and tree-driven, so these assert directly rather than
   // through a scripted walk.
   it("finds a top-level group", () => {
-    expect(bareGroupStartPath(["db"])).toEqual(["db"]);
-  });
-
-  it("finds a nested group", () => {
-    expect(bareGroupStartPath(["db", "seed"])).toEqual(["db", "seed"]);
+    expect(bareGroupStartPath(catalog, ["preset"])).toEqual(["preset"]);
   });
 
   it("returns null for a leaf command", () => {
-    expect(bareGroupStartPath(["db", "status"])).toBeNull();
+    expect(bareGroupStartPath(catalog, ["preset", "restart-stack"])).toBeNull();
   });
 
   it("returns null for an unknown subcommand token", () => {
-    expect(bareGroupStartPath(["db", "bogus"])).toBeNull();
+    expect(bareGroupStartPath(catalog, ["preset", "bogus"])).toBeNull();
   });
 
   it("returns null for a bare invocation", () => {
     // The no-argument wizard already covers this path; treating it as a
     // "resume" too would just be `pickGroup` reached a second way.
-    expect(bareGroupStartPath([])).toBeNull();
+    expect(bareGroupStartPath(catalog, [])).toBeNull();
   });
 
   it("returns null for a top-level leaf command", () => {
-    expect(bareGroupStartPath(["setup"])).toBeNull();
+    expect(bareGroupStartPath(catalog, ["setup"])).toBeNull();
   });
 
   it("ignores flag values ahead of the group name", () => {
     // `positionals` is what keeps `staging` from being misread as a
     // subcommand token here — the same bug class `args.ts`'s header warns
     // against for `env --file push audit`.
-    expect(bareGroupStartPath(["db", "--tier", "staging"])).toEqual(["db"]);
+    expect(
+      bareGroupStartPath(catalog, ["preset", "--tier", "staging"]),
+    ).toEqual(["preset"]);
   });
 });
 
@@ -361,23 +340,23 @@ describe("resuming at a node", () => {
   // the same leaf, with the same argv, as walking there from the top of the
   // tree — it just skips the screens above that group.
   it("reaches the same leaf as a full walk, skipping the group screens", async () => {
-    const full = await walk(answersFor(["db", "seed", "buckets"]));
-    expect(full).toEqual(["db", "seed", "buckets"]);
+    const full = await walk(answersFor(["preset", "restart-stack"]));
+    expect(full).toEqual(["preset", "restart-stack"]);
 
     const resumed = await resume(
-      ["db"],
-      [findCommand(["db", "seed"])!, findCommand(["db", "seed", "buckets"])!],
+      ["preset"],
+      [findCommand(["preset", "restart-stack"])!],
     );
     expect(resumed).toEqual(full);
 
-    // The first question is db's own subcommand screen, not the top-level
+    // The first question is preset's own subcommand screen, not the top-level
     // "What would you like to do?" — there is no group screen to skip past
     // because a resumed walk never opens one.
-    expect(asked[0]).toBe("db:");
+    expect(asked[0]).toBe("preset:");
   });
 
   it("dispatches nothing when the reader backs out of the resumed screen", async () => {
-    expect(await resume(["db"], [PICK_BACK])).toBeNull();
+    expect(await resume(["preset"], [PICK_BACK])).toBeNull();
   });
 });
 
@@ -400,10 +379,10 @@ describe("the deferred env-entry hook", () => {
       return dispatchCommand();
     });
 
-    const argv = await walk(answersFor(["db", "status"]));
+    const argv = await walk(answersFor(["preset", "restart-stack"]));
 
-    expect(argv).toEqual(["db", "status"]);
-    expect(seen.argv).toEqual(["db", "status"]);
+    expect(argv).toEqual(["preset", "restart-stack"]);
+    expect(seen.argv).toEqual(["preset", "restart-stack"]);
   });
 
   it("uses the hook's own return value as runMenu's result", async () => {
@@ -411,11 +390,15 @@ describe("the deferred env-entry hook", () => {
 
     let dispatched: string[] | null = null;
     answers.length = 0;
-    answers.push(...answersFor(["db", "status"]));
-    const result = await runMenu((argv) => {
-      dispatched = argv;
-      return Promise.resolve("dispatcher's own answer");
-    }, UNKNOWN_ENVIRONMENT);
+    answers.push(...answersFor(["preset", "restart-stack"]));
+    const result = await runMenu(
+      catalog,
+      (argv) => {
+        dispatched = argv;
+        return Promise.resolve("dispatcher's own answer");
+      },
+      UNKNOWN_ENVIRONMENT,
+    );
 
     expect(result).toBe("hook decided this.");
     // The hook in this test never calls its `dispatchCommand` argument, so
@@ -426,7 +409,7 @@ describe("the deferred env-entry hook", () => {
   it("clears the hook after one use — a nested walk does not inherit it", async () => {
     setMenuEnvHook(async (_argv, dispatchCommand) => dispatchCommand());
 
-    await walk(answersFor(["db", "status"]));
+    await walk(answersFor(["preset", "restart-stack"]));
 
     expect(takeMenuEnvHook()).toBeUndefined();
   });
@@ -436,8 +419,8 @@ describe("the deferred env-entry hook", () => {
     // a hook, and `walk()`'s own dispatcher still runs. This just says so
     // explicitly.
     expect(takeMenuEnvHook()).toBeUndefined();
-    const argv = await walk(answersFor(["db", "status"]));
-    expect(argv).toEqual(["db", "status"]);
+    const argv = await walk(answersFor(["preset", "restart-stack"]));
+    expect(argv).toEqual(["preset", "restart-stack"]);
   });
 });
 
@@ -470,12 +453,17 @@ describe("adapts to the machine", () => {
   const labels = (entries: Entry[]): (string | undefined)[] =>
     entries.map((entry) => entry.label);
 
-  it("offers stop and restart only while the stack is running", async () => {
-    expect(labels(await screen(RUNNING, ["db"]))).toContain("stop");
-    expect(labels(await screen(RUNNING, ["db"]))).toContain("restart");
-
-    expect(labels(await screen(STOPPED, ["db"]))).not.toContain("stop");
-    expect(labels(await screen(STOPPED, ["db"]))).not.toContain("restart");
+  it("offers the restart preset only while the stack is running", async () => {
+    expect(labels(await screen(RUNNING, ["preset"]))).toContain(
+      "restart-stack",
+    );
+    expect(labels(await screen(STOPPED, ["preset"]))).not.toContain(
+      "restart-stack",
+    );
+    // The presets that do not need a running stack stay on offer.
+    expect(labels(await screen(STOPPED, ["preset"]))).toContain(
+      "apply-migrations",
+    );
   });
 
   /**
@@ -486,34 +474,15 @@ describe("adapts to the machine", () => {
    * was before any of this existed.
    */
   it("hides nothing when it cannot read the machine", async () => {
-    const drawn = labels(await screen(UNKNOWN_ENVIRONMENT, ["db"]));
-    for (const command of findCommand(["db"])!.subcommands ?? []) {
+    const drawn = labels(await screen(UNKNOWN_ENVIRONMENT, ["preset"]));
+    for (const command of findCommand(["preset"])!.subcommands ?? []) {
       expect(drawn, command.name).toContain(command.name);
     }
   });
 
   /**
-   * `needs` itself is unit-tested directly against `blockedBecause`
-   * (`environment.test.ts`) — this integration pair used to exercise it
-   * through the real tree too, via `moderation roundtrip`. That command is
-   * gone (the app repo's CI covers the same round trip more thoroughly), and
-   * nothing left in the tree carries `needs` any more: `moderation
-   * check`/`grant-root` moved onto the session system alongside `db
-   * migrate`/`db reset`, which never gated on the local Docker stack either
-   * — a hosted session has no local stack to be "not running" in the first
-   * place. There is deliberately no replacement fixture command here; adding
-   * one back just to keep this integration pair alive would be testing the
-   * test, not the tree.
-   */
-
-  /**
-   * The "Database" group now holds exactly one command, `db`, and a group
-   * with one command is always offered whole — see `pickCommand`. The
-   * filtering this test used to show at the GROUP level (`link` shown,
-   * `stop` hidden while stopped) happens one screen deeper now, on `db`'s own
-   * subcommand list; "offers stop and restart only while the stack is
-   * running" above covers that. What is still true here is that the group's
-   * own hint names only what it actually contains.
+   * The group's own hint names only what it actually contains: the deprecated
+   * `db` and `cf` aliases are typed-only, so the wizard's line leaves them out.
    */
   it("names the runtime commands in the group's hint", async () => {
     await walk([], STOPPED).catch(() => null);
@@ -521,29 +490,28 @@ describe("adapts to the machine", () => {
       (entry) => entry.label === "Runtime & infrastructure",
     );
 
-    expect(database!.hint).toBe("db, cf, cron, workflows");
+    expect(database!.hint).toBe("preset, cron, workflows");
   });
 
   /**
-   * The layers `db` covers, told apart on the line.
+   * The layers the presets cover, told apart on the line.
    *
-   * `restart` and `reset` sit several entries apart and act on different
-   * things: the containers, and the database inside them. A reader choosing
-   * between them should not have to already know that.
+   * `restart-stack` and `apply-migrations` act on different things: the
+   * containers, and the database inside them. A reader choosing between them
+   * should not have to already know that.
    */
-  it("says which layer each db command acts on", async () => {
-    const drawn = await screen(RUNNING, ["db"]);
+  it("says which layer each preset acts on", async () => {
+    const drawn = await screen(RUNNING, ["preset"]);
     const hintOf = (name: string) =>
       drawn.find((entry) => entry.label === name)?.hint ?? "";
 
-    expect(hintOf("restart")).toContain("This machine · ");
-    expect(hintOf("stop")).toContain("This machine · ");
-    expect(hintOf("reset")).toContain("Database · ");
-    expect(hintOf("migrate")).toContain("Database · ");
+    expect(hintOf("restart-stack")).toContain("This machine · ");
+    expect(hintOf("new-migration")).toContain("Repo · ");
+    expect(hintOf("apply-migrations")).toContain("Database · ");
   });
 
   it("leaves a group without scopes unlabelled", async () => {
-    const drawn = await screen(RUNNING, ["moderation", "check"]);
+    const drawn = await screen(RUNNING, ["cron"]);
     for (const entry of drawn) {
       expect(entry.hint ?? "", entry.label).not.toContain(" · ");
     }

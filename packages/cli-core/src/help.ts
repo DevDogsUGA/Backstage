@@ -1,0 +1,267 @@
+/**
+ * `--help`, one level at a time.
+ *
+ * ## Why this is small
+ *
+ * The help this replaced was ~200 lines and printed the whole tree: every
+ * subcommand of every group, the Bitwarden target table, the four places an
+ * access token is looked for, the grants `migration_planner` holds, and which
+ * deploy steps must avoid the `with-env` wrapper. A contributor running
+ * `pnpm devtools --help` to find out how to start a database read all of it.
+ *
+ * Two rules now:
+ *
+ *   1. **A level prints its own children and stops.** `--help` lists the
+ *      top-level commands; `env --help` lists env's subcommands; `env pull
+ *      --help` lists that command's options. Depth is reached by asking for
+ *      it.
+ *   2. **No more than the caller needs to choose.** Operator internals are
+ *      `docs/`'s job: which project a target maps to, how a credential is
+ *      resolved, what a deploy job's environment holds. Help says what a
+ *      command does and what it takes.
+ *
+ * Both fall out of rendering the catalog rather than hand-writing prose, so
+ * neither can rot back into a wall of text one paragraph at a time.
+ */
+import {
+  SCOPES,
+  type Catalog,
+  type CommandNode,
+  type CommandOption,
+  type Scope,
+} from "./catalog.js";
+
+const INDENT = "  ";
+
+/** `--target <t>`, or `--prune` for a boolean. */
+function optionLabel(option: CommandOption): string {
+  return option.value ? `${option.flag} ${option.value}` : option.flag;
+}
+
+/**
+ * Two columns, with the gutter sized to the widest label in THIS block.
+ *
+ * Per-block rather than one width for the whole file: `deploy`'s labels are
+ * long and `setup`'s are not, and a shared width would indent the short list
+ * halfway across the terminal to accommodate a group the reader is not
+ * looking at.
+ */
+function columns(rows: readonly [string, string][]): string[] {
+  const width = Math.max(...rows.map(([label]) => label.length));
+  return rows.map(
+    ([label, text]) => `${INDENT}${label.padEnd(width)}  ${text}`,
+  );
+}
+
+/**
+ * A list of commands, split into scope blocks when any of them declares one.
+ *
+ * Used at two levels: a GROUP's own commands (no group has scoped commands
+ * today — `db` folded the old "Supabase" group's scopes into itself), and a
+ * command's own SUBCOMMANDS (`db`'s: `start`/`connect`/`stop`/`restart` on
+ * this machine, `migration` in the repo, `status`/`migrate`/`reset`/… on an
+ * endpoint, `planner`/`signing-key` naming their own connection). Either way,
+ * a flat list leaves the reader to work out which of `restart` and `reset` is
+ * which, the distinction that costs people an afternoon. A list with no
+ * scopes renders as it always did: one block, one indent, no headings.
+ *
+ * The blocks follow declaration order rather than `SCOPES` order, so the tree
+ * stays the one place that decides how the list reads. The gutter is sized
+ * across the whole list, not per block, so every block lines up with the
+ * others rather than each finding its own column.
+ */
+function scopedBody(commands: readonly CommandNode[]): string[] {
+  if (!commands.some((command) => command.scope)) {
+    return columns(childRows(commands));
+  }
+
+  const width = Math.max(...commands.map((command) => command.name.length));
+  const lines: string[] = [];
+  let open: Scope | undefined;
+
+  for (const command of commands) {
+    if (command.scope && command.scope !== open) {
+      open = command.scope;
+      lines.push(`${INDENT}${SCOPES[open].help}:`);
+    }
+    lines.push(
+      `${INDENT.repeat(2)}${command.name.padEnd(width)}  ${command.summary}`,
+    );
+  }
+
+  return lines;
+}
+
+function optionRows(options: readonly CommandOption[]): [string, string][] {
+  return options.map((option) => [optionLabel(option), option.summary]);
+}
+
+function childRows(children: readonly CommandNode[]): [string, string][] {
+  return children.map((child) => [
+    child.name,
+    child.deprecated ? `${child.summary} (deprecated)` : child.summary,
+  ]);
+}
+
+// ── The three levels ─────────────────────────────────────────────────────────
+
+/** `pnpm devtools --help`: the groups, and nothing below them. */
+function renderRoot(catalog: Catalog): string {
+  const lines = [
+    `${catalog.usage} [command] [options]`,
+    "",
+    "Run with no command to choose from a menu.",
+    "",
+    "Common tasks:",
+    ...columns(catalog.commonTasks.map(([command, what]) => [command, what])),
+  ];
+
+  for (const group of catalog.groups) {
+    lines.push("", `${group.title}:`, ...scopedBody(group.commands));
+  }
+
+  lines.push(
+    "",
+    "Options:",
+    ...columns([
+      ["--help, -h", "Show this message"],
+      [
+        "--tier <t>",
+        "Deploy tier for this whole invocation (development, staging, production)",
+      ],
+      [
+        "--no-env",
+        "Load no env files; the environment you pass is the environment",
+      ],
+    ]),
+    "",
+    `\`${catalog.usage} <command> --help\` shows what that command takes.`,
+  );
+
+  return lines.join("\n");
+}
+
+/** `pnpm devtools <path…> --help`: one command's own children and options. */
+function renderCommand(
+  catalog: Catalog,
+  path: readonly string[],
+  node: CommandNode,
+): string {
+  const children = node.subcommands ?? [];
+  const options = node.options ?? [];
+  const trail = path.join(" ");
+
+  const usage = [
+    catalog.usage,
+    trail,
+    children.length > 0 ? "<subcommand>" : "",
+    options.length > 0 ? "[options]" : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+
+  const lines = [usage, "", node.summary];
+
+  if (node.deprecated) lines.push("", `Deprecated. ${node.deprecated}`);
+
+  if (children.length > 0) {
+    lines.push("", "Subcommands:", ...scopedBody(children));
+  }
+
+  if (options.length > 0) {
+    lines.push("", "Options:", ...columns(optionRows(options)));
+  }
+
+  if (children.length > 0) {
+    lines.push(
+      "",
+      `\`${catalog.usage} ${trail} <subcommand> --help\` shows what that one takes.`,
+    );
+  }
+
+  return lines.join("\n");
+}
+
+/**
+ * Renders help for a path, falling back to the root.
+ *
+ * An unknown path renders the root rather than an error: this is only reached
+ * when `--help` was asked for, and answering a mistyped command with the list
+ * it was mistyped from is more use than a refusal.
+ */
+export function renderHelp(
+  catalog: Catalog,
+  path: readonly string[] = [],
+): string {
+  if (path.length === 0) return renderRoot(catalog);
+
+  const node = catalog.findCommand(path);
+  if (!node) return renderRoot(catalog);
+
+  return renderCommand(catalog, path, node);
+}
+
+/**
+ * The command names in `argv` that precede any flag.
+ *
+ * `env pull --help` asks about `["env", "pull"]`; `--help env` asks about
+ * nothing, because a flag's value is not a command path. Kept separate from
+ * `positionals()`: that one strips a known set of value-taking flags to find a
+ * subcommand, and here anything after the first flag is not part of the path at
+ * all.
+ */
+export function helpPath(argv: readonly string[]): string[] {
+  const path: string[] = [];
+  for (const arg of argv) {
+    if (arg.startsWith("-")) break;
+    path.push(arg);
+  }
+  return path;
+}
+
+/** One row of `--help --json`. */
+export interface CommandListEntry {
+  /** The space-joined command path: `env pull`. */
+  path: string;
+  summary: string;
+  /** `cli-only` commands are typed-only; the wizard never offers them. */
+  surface: "interactive" | "cli-only";
+  /** What replaces a deprecated command. Absent otherwise. */
+  deprecated?: string;
+}
+
+/**
+ * Every command path the CLI accepts, for tools that need the supported list
+ * (the docs build refuses a page that shows a command that no longer exists).
+ *
+ * A declared export rather than a scrape of `--help`: same tree, parsed once.
+ * Only this CLI's own tree, so a doc cannot pass by showing a command that
+ * belongs to the other CLI (`pnpm devtools deploy`).
+ */
+export function commandList(catalog: Catalog): CommandListEntry[] {
+  const entries: CommandListEntry[] = [];
+  const visit = (
+    nodes: readonly CommandNode[],
+    prefix: readonly string[],
+    inheritedCliOnly: boolean,
+  ): void => {
+    for (const node of nodes) {
+      const path = [...prefix, node.name];
+      const cliOnly = inheritedCliOnly || node.surface === "cli-only";
+      entries.push({
+        path: path.join(" "),
+        summary: node.summary,
+        surface: cliOnly ? "cli-only" : "interactive",
+        ...(node.deprecated ? { deprecated: node.deprecated } : {}),
+      });
+      visit(node.subcommands ?? [], path, cliOnly);
+    }
+  };
+  visit(catalog.topLevel, [], false);
+  return entries;
+}
+
+/** `--help --json`'s document: the version and every command path. */
+export function renderCommandList(catalog: Catalog, version: string): string {
+  return JSON.stringify({ version, commands: commandList(catalog) }, null, 2);
+}
