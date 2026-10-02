@@ -77,3 +77,11 @@ jobs:
       # here, matching how it gates merges in the product repo's ci.yaml.
       - name: Events config passes its publishability checks
         run: pnpm --filter @devdogsuga/events check:events
+
+  publish:
+    needs: validate
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    permissions:
+      contents: write
+      id-token: write
+    uses: ./.github/workflows/publish.yaml

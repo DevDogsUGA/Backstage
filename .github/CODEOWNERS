@@ -1,0 +1,5 @@
+* @DevDogsUGA/devops
+
+# Only admins own the ownership policy itself. This must remain last because
+# the last matching CODEOWNERS pattern wins.
+/.github/CODEOWNERS @DevDogsUGA/admins
