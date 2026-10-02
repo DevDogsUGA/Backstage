@@ -161,6 +161,9 @@ describe("prompts", () => {
       "--workflow",
       "--params",
       "--port",
+      // `jobs`' kind filter, what the `cron`/`workflows` aliases stand for.
+      // The picker heads each kind already, so asking first would ask twice.
+      "--kind",
       // `oauth`'s connect-transport override (TASK-352). Which transport —
       // the local loopback listener or the device-code flow — is decided
       // automatically from the environment (SSH/Codespaces/dev container,
@@ -215,15 +218,17 @@ describe("coverage of what the CLI dispatches", () => {
     "oauth",
     "script",
     "env",
-    "cron",
-    "workflows",
+    "jobs",
     // Both are dispatched twice: once in `main()` ahead of `intro()`, which is
     // what a typed command line reaches, and once in `dispatch` for the walk
     // the wizard hands back. They belong here for the second of those.
     "run",
-    // The presets, and the real tools (passthroughs, typed only: `main()`
-    // routes them ahead of `intro()`).
-    "preset",
+    // The Supabase jobs, and the real tools (passthroughs, typed only:
+    // `main()` routes them ahead of `intro()`).
+    "restart-stack",
+    "new-migration",
+    "apply-migrations",
+    "push-config",
     "supabase",
     "wrangler",
     "drizzle-kit",
@@ -238,19 +243,25 @@ describe("coverage of what the CLI dispatches", () => {
 
   it("declares the subcommands each group dispatches", () => {
     expect(subcommandNames(["env"])).toEqual(["init", "example", "reset"]);
-    expect(subcommandNames(["cron"])).toEqual(["list", "run"]);
-    expect(subcommandNames(["workflows"])).toEqual(["list", "run", "serve"]);
+    expect(subcommandNames(["jobs"])).toEqual(["run", "list", "serve"]);
     expect(subcommandNames(["check"])).toEqual([
       "migrations",
       "env",
       "workers",
       "scripts",
     ]);
-    expect(subcommandNames(["preset"])).toEqual([
-      "restart-stack",
-      "new-migration",
-      "apply-migrations",
-      "push-config",
+  });
+
+  it("answers to the retired kind-specific names, as aliases of jobs", () => {
+    expect(findCommand(["cron", "run"])).toBe(findCommand(["jobs", "run"]));
+    expect(findCommand(["workflows", "serve"])).toBe(
+      findCommand(["jobs", "serve"]),
+    );
+    expect(catalog.canonicalArgv(["cron", "run"])).toEqual([
+      "jobs",
+      "run",
+      "--kind",
+      "sync",
     ]);
   });
 
@@ -264,6 +275,7 @@ describe("coverage of what the CLI dispatches", () => {
       ["gen"],
       ["emails"],
       ["grant-root"],
+      ["preset"],
     ]) {
       expect(findCommand(path), path.join(" ")).toBeNull();
     }
@@ -272,9 +284,6 @@ describe("coverage of what the CLI dispatches", () => {
   it("keeps every deprecated command out of the wizard", () => {
     for (const { path, node } of everyNode()) {
       if (!node.deprecated) continue;
-      // `run` stays in the menu until the package-script picker replaces its
-      // app picker (it is the only way the wizard starts a dev server).
-      if (path[0] === "run") continue;
       expect(node.surface, path.join(" ")).toBe("cli-only");
     }
     expect(findCommand(["completions"])?.surface).toBe("cli-only");
@@ -282,26 +291,33 @@ describe("coverage of what the CLI dispatches", () => {
 });
 
 describe("scopes", () => {
-  // Scopes divide the presets' lines now that `db` is gone: the layer each
-  // one acts on, so a contributor chooses deliberately rather than by accident.
-  const presets = () => findCommand(["preset"])!.subcommands ?? [];
+  // Scopes divide the Supabase jobs' lines now that `db` is gone: the layer
+  // each one acts on, so a contributor chooses deliberately rather than by
+  // accident.
+  const SUPABASE = [
+    "restart-stack",
+    "new-migration",
+    "apply-migrations",
+    "push-config",
+  ];
+  const presets = () => SUPABASE.map((name) => findCommand([name])!);
 
-  it("labels every preset", () => {
+  it("labels every Supabase job", () => {
     for (const command of presets()) {
-      expect(command.scope, `preset ${command.name}`).toBeDefined();
+      expect(command.scope, command.name).toBeDefined();
     }
   });
 
-  it("labels nothing outside the presets", () => {
+  it("labels nothing else", () => {
     for (const { path, node } of everyNode()) {
-      if (path[0] === "preset" && path.length > 1) continue;
+      if (path.length === 1 && SUPABASE.includes(path[0]!)) continue;
       expect(node.scope, path.join(" ")).toBeUndefined();
     }
   });
 
   /**
    * `--help` opens a heading every time the scope changes as it walks the
-   * presets, so scopes that interleaved would render as many one-line blocks
+   * Supabase group, so scopes that interleaved would render as many one-line blocks
    * rather than readable ones. Declaration order carries that.
    */
   it("declares each scope in one contiguous run", () => {
@@ -313,7 +329,7 @@ describe("scopes", () => {
       if (command.scope === open) continue;
       expect(
         opened.has(command.scope),
-        `preset ${command.name} reopens ${command.scope}`,
+        `${command.name} reopens ${command.scope}`,
       ).toBe(false);
       opened.add(command.scope);
       open = command.scope;
@@ -331,7 +347,7 @@ describe("scopes", () => {
 describe("subcommandList", () => {
   it("reads as a sentence", () => {
     expect(subcommandList(["roles"])).toBe("list, grant or revoke");
-    expect(subcommandList(["cron"])).toBe("list or run");
+    expect(subcommandList(["jobs"])).toBe("run, list or serve");
   });
 
   it("is empty for a leaf", () => {
