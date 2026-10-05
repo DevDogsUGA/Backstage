@@ -4,7 +4,7 @@
   "private": false,
   "type": "module",
   "description": "Contributor CLI for a DevDogsUGA checkout: the real tools with the session's tier filled in, a menu over them, and the checks CI runs. Ships built JS; run via `pnpm dlx @devdogsuga/devtools` (or the `devtools` bin once installed) from inside a DevDogsUGA clone.",
-  "license": "MIT",
+  "license": "BSD-3-Clause",
   "repository": {
     "type": "git",
     "url": "https://github.com/DevDogsUGA/Backstage.git",
