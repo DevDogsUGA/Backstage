@@ -10,7 +10,8 @@ const pkg = JSON.parse(
 
 /**
  * Bundles the CLI into a flat `dist/`, inlining `@devdogsuga/cli-core` (the
- * private shared core, a `workspace:*` devDependency) and nothing else: every
+ * private shared core) and `@devdogsuga/telemetry` (which the core imports),
+ * both `workspace:*` devDependencies, and nothing else: every
  * other import stays external and must be declared in this package's
  * `dependencies`/`peerDependencies`. The build fails (`onlyBundle`) if
  * anything from `node_modules` is inlined, and (`onlyImport`) if the output
@@ -42,7 +43,10 @@ export default defineConfig({
   // The core resolves its own imports from its own node_modules; devtools
   // declares the same packages, so the same names stay external.
   deps: {
-    alwaysBundle: [/^@devdogsuga\/cli-core(\/|$)/],
+    alwaysBundle: [
+      /^@devdogsuga\/cli-core(\/|$)/,
+      /^@devdogsuga\/telemetry(\/|$)/,
+    ],
     onlyBundle: [],
     onlyImport: [
       ...Object.keys(pkg.dependencies ?? {}),
