@@ -21,3 +21,6 @@ dist/
 packages/brand/src/generated/assets.ts
 packages/brand/src/generated/icons.ts
 packages/brand/palette.css
+
+# Link to the DevDogsUGA checkout (see scripts/devdogsuga.mjs); local to each machine.
+/devdogsuga
